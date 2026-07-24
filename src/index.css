@@ -1,0 +1,150 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-primary-gold: #FFC107;
+  --color-secondary-orange: #FF6B00;
+  --color-accent-amber: #FFD54F;
+  --color-highlight-gold: #FFB300;
+  --color-bg-cream: #FFFDF7;
+}
+
+/* Custom Glossy & Glassmorphism Premium Utilities */
+@layer utilities {
+  .bg-glossy-gold {
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 50%),
+                linear-gradient(135deg, #FFD54F 0%, #FFC107 35%, #FF9800 70%, #FF6B00 100%);
+    box-shadow: 
+      0 10px 25px -5px rgba(255, 107, 0, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.4),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.4);
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .bg-glossy-gold::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(to right, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.3) 50%, rgba(255, 255, 255, 0) 100%);
+    transform: skewX(-25deg);
+    transition: 0.75s;
+    pointer-events: none;
+  }
+  
+  .bg-glossy-gold:hover::before {
+    left: 150%;
+  }
+
+  .btn-glossy-gold {
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 50%),
+                linear-gradient(135deg, #FFD54F 0%, #FFC107 35%, #FF9800 70%, #FF6B00 100%);
+    box-shadow: 
+      0 8px 20px -4px rgba(255, 107, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    color: #FFFFFF;
+    font-weight: 700;
+  }
+  
+  .btn-glossy-gold:hover {
+    transform: translateY(-2px) scale(1.02);
+    filter: brightness(1.08);
+    box-shadow: 
+      0 12px 25px -4px rgba(255, 107, 0, 0.42),
+      inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  }
+  
+  .btn-glossy-gold:active {
+    transform: translateY(1px) scale(0.98);
+    box-shadow: 0 4px 10px -2px rgba(255, 107, 0, 0.25);
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    box-shadow: 0 8px 32px -6px rgba(255, 107, 0, 0.04);
+  }
+
+  .glass-card-hover {
+    transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .glass-card-hover:hover {
+    transform: translateY(-4px);
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 
+      0 20px 40px -15px rgba(255, 107, 0, 0.1),
+      0 0 1px 1px rgba(255, 193, 7, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.95);
+  }
+  
+  .glossy-top-highlight {
+    position: relative;
+  }
+  
+  .glossy-top-highlight::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #FFD54F, #FFC107, #FF9800, #FF6B00);
+    border-radius: 9999px 9999px 0 0;
+  }
+  
+  /* Shimmer / Skeleton Animation */
+  .shimmer {
+    background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.6) 50%, rgba(255,255,255,0) 100%);
+    background-size: 200% 100%;
+    animation: shimmer-pulse 1.6s infinite;
+  }
+  
+  @keyframes shimmer-pulse {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  /* Font Calibri utility */
+  .font-calibri, .font-calibri * {
+    font-family: 'Calibri', 'Carlito', 'Segoe UI', Candara, Arial, sans-serif !important;
+  }
+}
+
+/* Fade In Animation for all buttons */
+@keyframes buttonFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+button {
+  animation: buttonFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out, background-color 0.2s ease-in-out, border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+/* Hide scrollbar globally for all elements while maintaining full scroll/swipe functionality */
+* {
+  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important; /* IE and Edge */
+}
+
+*::-webkit-scrollbar {
+  display: none !important; /* Chrome, Safari, and Opera */
+}
+

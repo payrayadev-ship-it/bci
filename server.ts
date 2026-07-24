@@ -1,0 +1,1895 @@
+import express from "express";
+import path from "path";
+import fs from "fs";
+import { createServer as createViteServer } from "vite";
+import { GoogleGenAI } from "@google/genai";
+import { AppDatabase, User, Company, FeedPost, NewsArticle, B2BProduct, Tender, BusinessEvent, ForumPost, ChatMessage, CRMLead } from "./src/types";
+
+const app = express();
+const PORT = 3000;
+
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+// Path to JSON database
+const DB_DIR = path.join(process.cwd(), "data");
+const DB_FILE = path.join(DB_DIR, "db.json");
+
+// Safe lazy-initialization of Gemini client
+let aiClient: any = null;
+function getAI() {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey && apiKey !== "MY_GEMINI_API_KEY" && apiKey.trim() !== "") {
+      try {
+        aiClient = new GoogleGenAI({
+          apiKey: apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            }
+          }
+        });
+        console.log("Gemini AI Client initialized successfully.");
+      } catch (e) {
+        console.error("Failed to initialize Gemini AI Client:", e);
+      }
+    }
+  }
+  return aiClient;
+}
+
+// Initial seed data
+const initialDatabase: AppDatabase = {
+  users: [
+    {
+      id: "usr_1",
+      name: "Budi Santoso",
+      email: "budi.santoso@telkom.co.id",
+      role: "Perusahaan",
+      avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120",
+      companyId: "comp_telkom",
+      membership: "Enterprise"
+    },
+    {
+      id: "usr_2",
+      name: "Siti Rahma",
+      email: "siti.rahma@lestari.vc",
+      role: "Investor",
+      avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120",
+      companyId: "comp_lestari",
+      membership: "Premium"
+    },
+    {
+      id: "usr_3",
+      name: "Andi Wijaya",
+      email: "andi.wijaya@majubersama.com",
+      role: "Supplier",
+      avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=120",
+      companyId: "comp_maju",
+      membership: "Premium"
+    },
+    {
+      id: "usr_admin",
+      name: "Hendra Pratama",
+      email: "payrayadev@gmail.com", // From user metadata
+      role: "Super Admin",
+      avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=120",
+      membership: "Enterprise"
+    }
+  ],
+  companies: [
+    {
+      id: "comp_telkom",
+      name: "PT Telkom Indonesia (Persero) Tbk",
+      logo: "https://images.unsplash.com/photo-1614064641938-3bbee52942c7?auto=format&fit=crop&q=80&w=100",
+      cover: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=600",
+      sector: "Telekomunikasi & Teknologi",
+      description: "Perusahaan informasi dan komunikasi serta penyedia jasa dan jaringan telekomunikasi terbesar di Indonesia. Telkom melayani jutaan pelanggan di seluruh penjuru nusantara dengan layanan seluler, broadband, dan solusi korporasi.",
+      foundedYear: 1965,
+      legality: {
+        nib: "9120001234567",
+        npwp: "01.000.123.4-051.000",
+        certificates: ["Sertifikasi ISO 9001", "Sertifikasi ISO 27001", "Penghargaan BUMN Terbaik 2025"]
+      },
+      address: {
+        city: "Jakarta Selatan",
+        province: "DKI Jakarta",
+        fullAddress: "Telkom Landmark Tower, Jl. Jend. Gatot Subroto No. Kav. 52, RT.6/RW.1, Kuningan Barat",
+        mapsUrl: "https://maps.google.com"
+      },
+      contact: {
+        website: "https://www.telkom.co.id",
+        email: "corporate_comm@telkom.co.id",
+        whatsapp: "+628111234567",
+        socialMedia: {
+          linkedin: "https://linkedin.com/company/telkom-indonesia",
+          instagram: "https://instagram.com/telkomindonesia"
+        }
+      },
+      videoProfileUrl: "https://www.w3schools.com/html/mov_bbb.mp4",
+      photos: [
+        "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=400",
+        "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&q=80&w=400"
+      ],
+      portfolio: [
+        { title: "Sinergi Pembangunan Infrastruktur IKN", description: "Penyediaan jaringan internet serat optik berkecepatan tinggi dan pusat data ramah lingkungan di Ibu Kota Nusantara.", year: 2025 },
+        { title: "Digitalisasi 1 Juta UMKM Indonesia", description: "Program inkubasi nasional dan penyediaan platform SaaS terintegrasi untuk mendongkrak omset usaha mikro.", year: 2024 }
+      ],
+      products: [
+        { name: "Indibiz Cloud ERP", price: 1500000, image: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=150", description: "Sistem ERP cloud instan untuk automasi kasir, inventaris, perpajakan, dan laporan keuangan UMKM." },
+        { name: "MyDigiEnterprise Connectivity", price: 5000000, image: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&q=80&w=150", description: "Koneksi dedicated internet fiber dengan jaminan SLA 99.9% untuk operasional pabrik dan kantor." }
+      ],
+      services: ["Infrastruktur Cloud", "Dedicated Internet", "Konsultasi Transformasi Digital", "IoT & Big Data Analytics"],
+      employeesCount: 24000,
+      isVerified: true,
+      rating: 4.8,
+      reviewsCount: 340,
+      followersCount: 5420,
+      followedBy: []
+    },
+    {
+      id: "comp_lestari",
+      name: "Lestari Capital & Ventures",
+      logo: "https://images.unsplash.com/photo-1560179707-f14e90ef3623?auto=format&fit=crop&q=80&w=100",
+      cover: "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&q=80&w=600",
+      sector: "Investasi & Modal Ventura",
+      description: "Venture capital terkemuka di Asia Tenggara yang fokus memberikan pendanaan Seri A & B pada startup hijau berkelanjutan, agroteknologi, energi terbarukan, serta UMKM naik kelas yang menerapkan prinsip ESG.",
+      foundedYear: 2018,
+      legality: {
+        nib: "8123000543210",
+        npwp: "02.123.456.7-022.000",
+        certificates: ["Izin OJK Keuangan Modal Ventura", "Sertifikasi Green Finance Practitioner"]
+      },
+      address: {
+        city: "Jakarta Pusat",
+        province: "DKI Jakarta",
+        fullAddress: "Sudirman Central Business District (SCBD), Treasury Tower Lt. 42",
+        mapsUrl: "https://maps.google.com"
+      },
+      contact: {
+        website: "https://lestari.vc",
+        email: "dealflow@lestari.vc",
+        whatsapp: "+628122334455",
+        socialMedia: {
+          linkedin: "https://linkedin.com/company/lestari-capital"
+        }
+      },
+      videoProfileUrl: "https://www.w3schools.com/html/mov_bbb.mp4",
+      photos: [
+        "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?auto=format&fit=crop&q=80&w=400"
+      ],
+      portfolio: [
+        { title: "Investasi Seri A Kopi Kenangan", description: "Pendanaan akselerasi ekspansi 500 outlet baru di Asia Tenggara.", year: 2021 }
+      ],
+      products: [],
+      services: ["Pendanaan Ekuitas", "Mentoring Startup", "Sindikasi Pendanaan Investor", "ESG Compliance Advisory"],
+      employeesCount: 45,
+      isVerified: true,
+      rating: 4.9,
+      reviewsCount: 22,
+      followersCount: 1890,
+      followedBy: []
+    },
+    {
+      id: "comp_maju",
+      name: "CV Maju Bersama Teknik",
+      logo: "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&q=80&w=100",
+      cover: "https://images.unsplash.com/photo-1504917595217-d4dc5ebe6122?auto=format&fit=crop&q=80&w=600",
+      sector: "Manufaktur & Alat Berat",
+      description: "Produsen lokal mesin-mesin pengolahan makanan, pertanian, dan alat berat ringan untuk kebutuhan industri UMKM dan pabrik skala menengah. Memprioritaskan TKDN (Tingkat Komponen Dalam Negeri) di atas 60%.",
+      foundedYear: 2012,
+      legality: {
+        nib: "9120110443215",
+        npwp: "03.444.555.6-061.000",
+        certificates: ["SNI Mesin Pertanian", "Sertifikat TKDN Kemenperin"]
+      },
+      address: {
+        city: "Surabaya",
+        province: "Jawa Timur",
+        fullAddress: "Kawasan Industri Rungkut Blok H-14, Surabaya",
+        mapsUrl: "https://maps.google.com"
+      },
+      contact: {
+        website: "https://www.majubersamateknik.co.id",
+        email: "sales@majubersamateknik.co.id",
+        whatsapp: "+6281355556666",
+        socialMedia: {}
+      },
+      videoProfileUrl: "https://www.w3schools.com/html/mov_bbb.mp4",
+      photos: [
+        "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&q=80&w=400"
+      ],
+      portfolio: [
+        { title: "Otomatisasi Lini Produksi Pabrik Tepung", description: "Penyediaan mesin conveyor otomatis dan pemisah ayak bertenaga hidrolik efisiensi tinggi.", year: 2024 }
+      ],
+      products: [
+        { name: "Mesin Pencampur Pakan Ternak 500Kg", price: 28500000, image: "https://images.unsplash.com/photo-1581092162384-8987c1796715?auto=format&fit=crop&q=80&w=150", description: "Mesin heavy-duty pengaduk pakan ternak kering dan basah dengan kapasitas 500Kg per batch, bahan stainless steel tahan karat." }
+      ],
+      services: ["Fabrikasi Logam Custom", "Maintenance Alat Berat", "Pelatihan Operator Mesin"],
+      employeesCount: 120,
+      isVerified: true,
+      rating: 4.6,
+      reviewsCount: 78,
+      followersCount: 840,
+      followedBy: []
+    }
+  ],
+  feedPosts: [
+    {
+      id: "feed_1",
+      authorId: "usr_1",
+      authorName: "Budi Santoso",
+      authorRole: "Direktur Digital BUMN",
+      authorAvatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120",
+      authorCompany: "PT Telkom Indonesia",
+      type: "article",
+      title: "Masa Depan Kedaulatan Data dan AI di Indonesia",
+      content: "Seiring pertumbuhan pesat teknologi AI, kedaulatan data nasional menjadi isu krusial. Telkom berkomitmen penuh membangun High-Density Data Center ramah lingkungan di Indonesia untuk mendukung startup dan korporasi lokal mengoptimalkan model kecerdasan buatan mereka secara aman dan berdaulat. Mari bersama-sama kita bawa teknologi Indonesia bersaing di kancah global! #AIPower #KedaulatanData #DigitalIndonesia",
+      mediaUrl: "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&q=80&w=500",
+      likes: ["usr_2", "usr_3"],
+      comments: [
+        {
+          id: "cmt_1",
+          authorName: "Siti Rahma",
+          authorAvatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120",
+          content: "Langkah hebat Pak Budi! Kami di Lestari Capital sangat tertarik mendukung startup pengembang AI lokal yang ramah lingkungan.",
+          timestamp: "2026-07-16T10:00:00Z"
+        }
+      ],
+      sharesCount: 12,
+      repostsCount: 4,
+      isSavedBy: [],
+      timestamp: "2026-07-16T08:30:00Z"
+    },
+    {
+      id: "feed_2",
+      authorId: "usr_2",
+      authorName: "Siti Rahma",
+      authorRole: "Managing Partner VC",
+      authorAvatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120",
+      authorCompany: "Lestari Capital & Ventures",
+      type: "polling",
+      content: "Menjelang semester kedua 2026, fokus sektor apa yang menurut Anda paling menantang sekaligus berpotensi tinggi untuk pendanaan investor hijau di Indonesia?",
+      pollingOptions: [
+        { id: "opt_1", text: "Energi Baru Terbarukan (EBT)", votes: ["usr_1", "usr_admin"] },
+        { id: "opt_2", text: "Agroteknologi Berkelanjutan", votes: ["usr_3"] },
+        { id: "opt_3", text: "Manufaktur & Pengolahan Sampah", votes: [] }
+      ],
+      likes: ["usr_1"],
+      comments: [],
+      sharesCount: 3,
+      repostsCount: 1,
+      isSavedBy: [],
+      timestamp: "2026-07-15T14:15:00Z"
+    }
+  ],
+  newsArticles: [
+    {
+      id: "news_1",
+      title: "Pemerintah Tingkatkan Anggaran Insentif TKDN Guna Dorong Industri Manufaktur Lokal",
+      category: "Pemerintahan",
+      summary: "Kementerian Perindustrian meluncurkan insentif baru bagi perusahaan dalam negeri yang sukses menembus nilai Tingkat Komponen Dalam Negeri (TKDN) di atas 60%.",
+      content: "JAKARTA - Dalam upaya memperkuat kemandirian industri nasional, pemerintah secara resmi mengumumkan peningkatan dana alokasi insentif sertifikasi TKDN hingga 40% untuk tahun anggaran 2026. Langkah strategis ini diharapkan dapat mempercepat substitusi impor barang modal dan mesin pertanian serta memperkuat posisi supplier lokal dalam ekosistem rantai pasok B2B nasional.\n\nMenteri Perindustrian menegaskan bahwa sektor UMKM dan industri alat berat ringan akan diprioritaskan untuk mendapatkan subsidi proses pengujian dan sertifikasi ini secara gratis. Pengusaha dapat langsung mengajukan pendaftaran melalui platform resmi pemerintah terintegrasi.",
+      image: "https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&q=80&w=400",
+      authorName: "Hendra Pratama",
+      authorRole: "Redaktur Bisnis BCI",
+      timestamp: "2026-07-16T12:00:00Z",
+      seoKeywords: ["TKDN", "Kemenperin", "Manufaktur Lokal", "Insentif Industri", "B2B Indonesia"],
+      metaDescription: "Pemerintah meluncurkan insentif TKDN di atas 60% untuk memperkuat supplier manufaktur lokal dan UMKM.",
+      isModerated: false
+    },
+    {
+      id: "news_2",
+      title: "Tren Pendanaan Hijau: ESG Kini Menjadi Syarat Mutlak Bagi Startup Mencari Seri A",
+      category: "Investasi",
+      summary: "Asosiasi Modal Ventura Indonesia mengungkapkan bahwa 85% investor asing kini mewajibkan matriks dampak lingkungan dan sosial sebelum mengucurkan dana.",
+      content: "Dampak perubahan iklim global mendorong pergeseran masif di dunia modal ventura. Kini, startup tidak hanya dinilai dari pertumbuhan GMV atau retensi pengguna saja, melainkan kepatuhan mereka terhadap prinsip Environmental, Social, and Governance (ESG).\n\nBeberapa VC nasional, seperti Lestari Capital, telah meluncurkan panduan penilaian keberlanjutan yang akan digunakan sebagai filter utama. Startup pengembang teknologi logistik elektrik, pengemasan biodegradable, dan efisiensi air pertanian diprediksi mendominasi perolehan pendanaan pada paruh kedua tahun ini.",
+      image: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&q=80&w=400",
+      authorName: "Siti Rahma",
+      authorRole: "Kontributor ESG",
+      timestamp: "2026-07-15T09:30:00Z",
+      seoKeywords: ["ESG", "Pendanaan Hijau", "Startup Seri A", "Modal Ventura", "Investasi Berkelanjutan"],
+      metaDescription: "Prinsip ESG kini menjadi faktor penentu utama bagi startup Indonesia dalam mengamankan pendanaan ventura.",
+      isModerated: false
+    }
+  ],
+  marketplaceProducts: [
+    {
+      id: "prod_1",
+      companyId: "comp_maju",
+      companyName: "CV Maju Bersama Teknik",
+      companyLogo: "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&q=80&w=100",
+      category: "Mesin",
+      name: "Mesin Conveyor Industri Otomatis",
+      price: 45000000,
+      unit: "Unit",
+      image: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&q=80&w=250",
+      description: "Conveyor belt kustom dengan sensor pendeteksi logam terintegrasi, kecepatan motor dapat diatur secara digital (Variable Frequency Drive). Sangat cocok untuk lini pengemasan makanan, semen, dan logistik.",
+      city: "Surabaya",
+      province: "Jawa Timur",
+      rating: 4.7,
+      isVerified: true
+    },
+    {
+      id: "prod_2",
+      companyId: "comp_telkom",
+      companyName: "PT Telkom Indonesia",
+      companyLogo: "https://images.unsplash.com/photo-1614064641938-3bbee52942c7?auto=format&fit=crop&q=80&w=100",
+      category: "Software",
+      name: "Enterprise Resource Planning (ERP) Suite",
+      price: 3500000,
+      unit: "Bulan / Cabang",
+      image: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=250",
+      description: "Sistem ERP lengkap berbasis cloud. Mengelola keuangan, SDM, rantai pasok (supply chain), dan modul perpajakan Indonesia terupdate. Termasuk implementasi gratis untuk 3 bulan pertama.",
+      city: "Jakarta Selatan",
+      province: "DKI Jakarta",
+      rating: 4.9,
+      isVerified: true
+    }
+  ],
+  tenders: [
+    {
+      id: "tend_1",
+      companyId: "comp_telkom",
+      companyName: "PT Telkom Indonesia",
+      companyLogo: "https://images.unsplash.com/photo-1614064641938-3bbee52942c7?auto=format&fit=crop&q=80&w=100",
+      title: "Pengadaan Genset Hybrid Ramah Lingkungan 100KVA",
+      value: 1200000000,
+      deadline: "2026-08-15",
+      requirements: [
+        "Sertifikasi TKDN minimal 45%",
+        "Memiliki NPWP & legalitas badan usaha aktif",
+        "Pengalaman kerja sejenis dalam 3 tahun terakhir",
+        "Menyertakan garansi penuh minimal 2 tahun"
+      ],
+      location: "IKN, Kalimantan Timur",
+      description: "Kami mengundang pabrikan dan distributor alat berat teknik untuk berpartisipasi dalam penyediaan 5 unit genset hybrid (solar & panel surya terintegrasi) kapasitas 100KVA guna mendukung keandalan pusat data darurat kami di area Ibu Kota Nusantara.",
+      documents: ["Term_of_Reference_Genset_Hybrid_IKN.pdf", "Formulir_Penawaran_Harga.xlsx"],
+      proposals: [
+        {
+          id: "prop_1",
+          vendorId: "comp_maju",
+          vendorName: "CV Maju Bersama Teknik",
+          vendorLogo: "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&q=80&w=100",
+          budgetProposed: 1150000000,
+          timeline: "45 Hari Kerja",
+          coverLetter: "Dengan hormat, kami mengajukan proposal penawaran genset hybrid buatan lokal dengan komponen TKDN mencapai 52%. Kami siap melaksanakan instalasi penuh dan memberikan dukungan teknis berkala.",
+          status: "Review",
+          timestamp: "2026-07-16T11:00:00Z"
+        }
+      ],
+      isPremium: true,
+      status: "Buka"
+    }
+  ],
+  events: [
+    {
+      id: "evt_1",
+      title: "Indonesia B2B Expo & Networking Forum 2026",
+      type: "Expo",
+      date: "2026-08-20",
+      time: "09:00 - 17:00 WIB",
+      location: "Jakarta Convention Center (JCC), Senayan",
+      description: "Pameran perdagangan B2B terbesar di Indonesia yang mempertemukan ribuan supplier industri, instansi pemerintahan, dan investor. Dapatkan kesempatan emas melakukan business matching secara tatap muka langsung.",
+      organizer: "Business Connect Indonesia",
+      image: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?auto=format&fit=crop&q=80&w=400",
+      isSynced: true
+    },
+    {
+      id: "evt_2",
+      title: "Workshop Virtual: Teknik Menyusun Pitch Deck Startup Hijau",
+      type: "Webinar",
+      date: "2026-07-28",
+      time: "14:00 - 16:00 WIB",
+      location: "Google Meet / BCI Live Meeting Room",
+      description: "Pelajari kiat-kiat jitu menyusun presentasi bisnis (pitch deck) yang memikat investor global dengan fokus implementasi ESG dan Sustainable Development Goals (SDGs).",
+      organizer: "Lestari Capital & Ventures",
+      image: "https://images.unsplash.com/photo-1515187029135-18ee286d815b?auto=format&fit=crop&q=80&w=400",
+      isSynced: false
+    },
+    {
+      id: "evt_3",
+      title: "Temu Sinergi Kontraktor IKN & Supplier Manufaktur",
+      type: "Business Matching",
+      date: "2026-08-10",
+      time: "10:00 - 15:00 WIB",
+      location: "Hotel Mulia Senayan & Online Live Stream",
+      description: "Sesi kurasi matching B2B khusus vendor infrastruktur, energi terbarukan, dan material bangunan untuk proyek percepatan pembangunan Kawasan Inti Pusat Pemerintahan (KIPP) IKN.",
+      organizer: "Konsortium BUMN Industri",
+      image: "https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=400",
+      isSynced: true
+    },
+    {
+      id: "evt_4",
+      title: "Sosialisasi Regulasi TKDN Kementerian Perindustrian",
+      type: "Seminar",
+      date: "2026-07-25",
+      time: "09:30 - 12:00 WIB",
+      location: "Auditorium Kemenperin, Jakarta / Zoom",
+      description: "Penjelasan panduan pendaftaran sertifikasi Tingkat Komponen Dalam Negeri (TKDN) gratis untuk pelaku UMKM dan perusahaan manufaktur skala menengah.",
+      organizer: "Pusat P3DN Kemenperin",
+      image: "https://images.unsplash.com/photo-1475721027785-f74eccf877e2?auto=format&fit=crop&q=80&w=400",
+      isSynced: false
+    },
+    {
+      id: "evt_5",
+      title: "Pameran Hilirisasi Ekspor & Investasi UMKM Surabaya",
+      type: "Networking",
+      date: "2026-09-05",
+      time: "10:00 - 18:00 WIB",
+      location: "Grand City Convention Hall Surabaya",
+      description: "Ajang temu produsen komoditas unggulan daerah dengan pembeli internasional (buyers) dari Asia Tenggara dan Timur Tengah.",
+      organizer: "Dinas Perindustrian & Perdagangan",
+      image: "https://images.unsplash.com/photo-1431540015161-0bf868a2d407?auto=format&fit=crop&q=80&w=400",
+      isSynced: false
+    }
+  ],
+  forumPosts: [
+    {
+      id: "forum_1",
+      category: "Pajak",
+      authorName: "Rudi Hartono",
+      authorAvatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120",
+      authorRole: "Konsultan Pajak Utama",
+      title: "Kiat Pengurangan Pajak Super Deduction Kegiatan Riset & Vokasi UMKM",
+      content: "Halo rekan-rekan bisnis! Apakah ada yang sudah mencoba memanfaatkan skema insentif Pajak Super Deduction untuk pengeluaran riset produk atau pelatihan kejuruan vokasi? Sesuai regulasi terbaru, kita bisa mendapatkan pengurangan penghasilan bruto hingga 300%. Ini sangat lumayan menghemat cashflow perusahaan. Yuk berdiskusi!",
+      likes: ["usr_1", "usr_3"],
+      comments: [
+        {
+          id: "f_cmt_1",
+          authorName: "Andi Wijaya",
+          authorAvatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=120",
+          authorRole: "Supplier",
+          content: "Sangat menarik Pak Rudi! CV kami sedang melakukan pelatihan mesin bubut untuk anak-anak SMK, apakah ini bisa langsung diajukan ke dinas perpajakan daerah?",
+          timestamp: "2026-07-16T11:20:00Z"
+        }
+      ],
+      timestamp: "2026-07-16T09:00:00Z"
+    }
+  ],
+  chatMessages: [
+    {
+      id: "msg_1",
+      chatId: "usr_2_comp_maju",
+      senderId: "usr_2",
+      senderName: "Siti Rahma",
+      senderAvatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120",
+      message: "Halo Pak Andi, saya melihat portofolio mesin conveyor otomatis dari CV Maju Bersama Teknik. Apakah ada brosur lengkap berserta sertifikasi TKDN-nya?",
+      timestamp: "2026-07-16T11:45:00Z",
+      isRead: true
+    },
+    {
+      id: "msg_2",
+      chatId: "usr_2_comp_maju",
+      senderId: "usr_3",
+      senderName: "Andi Wijaya",
+      senderAvatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=120",
+      message: "Selamat siang Ibu Siti! Tentu ada, kami baru saja mendapatkan sertifikasi TKDN dari Kemenperin sebesar 52%. Berikut saya lampirkan dokumen ringkasannya.",
+      timestamp: "2026-07-16T11:50:00Z",
+      file: {
+        name: "Ringkasan_TKDN_CV_Maju_Bersama.pdf",
+        type: "pdf",
+        url: "#"
+      },
+      isRead: false
+    }
+  ],
+  crmLeads: [
+    {
+      id: "lead_1",
+      companyId: "comp_telkom",
+      contactName: "Budi Santoso",
+      email: "budi.santoso@telkom.co.id",
+      phone: "+628111234567",
+      dealValue: 750000000,
+      stage: "Negotiation",
+      nextFollowUp: "2026-07-20",
+      notes: "Follow up proposal integrasi IoT Smart Factory. Klien meminta penyesuaian SLA jaringan dedicated.",
+      lastUpdated: "2026-07-16T12:00:00Z"
+    },
+    {
+      id: "lead_2",
+      companyId: "comp_maju",
+      contactName: "Andi Wijaya",
+      email: "andi.wijaya@majubersama.com",
+      phone: "+6281355556666",
+      dealValue: 120000000,
+      stage: "Contacted",
+      nextFollowUp: "2026-07-18",
+      notes: "Pertemuan awal membahas kustomisasi mesin pencampur pakan ternak industri.",
+      lastUpdated: "2026-07-15T15:30:00Z"
+    }
+  ],
+  auditLogs: [
+    { id: "log_1", user: "Sistem", action: "Basis data Business Connect Indonesia berhasil di-seed", timestamp: "2026-07-16T13:17:30Z" }
+  ],
+  zohoBooks: {
+    invoices: [
+      {
+        id: "inv_101",
+        invoiceNumber: "INV-2026-001",
+        customerName: "Budi Santoso",
+        customerCompany: "PT Telkom Indonesia",
+        customerEmail: "budi.santoso@telkom.co.id",
+        issueDate: "2026-07-01",
+        dueDate: "2026-07-31",
+        items: [
+          { id: "item_i1", description: "Pengadaan Mesin Conveyor Otomatis High Speed", qty: 2, unit: "Unit", unitPrice: 45000000, total: 90000000 },
+          { id: "item_i2", description: "Jasa Instalasi & Kalibrasi Sensor Industri", qty: 1, unit: "Paket", unitPrice: 15000000, total: 15000000 }
+        ],
+        subtotal: 105000000,
+        taxAmount: 11550000,
+        totalAmount: 116550000,
+        paidAmount: 116550000,
+        status: "Lunas",
+        paymentMethod: "Bank Transfer BCA",
+        notes: "Lunas via BCI Escrow Account."
+      },
+      {
+        id: "inv_102",
+        invoiceNumber: "INV-2026-002",
+        customerName: "Siti Rahma",
+        customerCompany: "Lestari Capital & Ventures",
+        customerEmail: "siti.rahma@lestari.vc",
+        issueDate: "2026-07-10",
+        dueDate: "2026-08-10",
+        items: [
+          { id: "item_i3", description: "Lisensi Cloud ERP Indibiz B2B (12 Bulan)", qty: 1, unit: "Tahun", unitPrice: 42000000, total: 42000000 }
+        ],
+        subtotal: 42000000,
+        taxAmount: 4620000,
+        totalAmount: 46620000,
+        paidAmount: 0,
+        status: "Belum Dibayar",
+        notes: "Termin 30 Hari Kerja."
+      }
+    ],
+    estimates: [
+      {
+        id: "est_201",
+        estimateNumber: "EST-2026-008",
+        customerName: "Andi Wijaya",
+        customerCompany: "CV Maju Bersama Teknik",
+        issueDate: "2026-07-12",
+        expiryDate: "2026-08-12",
+        items: [
+          { id: "item_e1", description: "Penawaran Pembuatan Moulding Cor Logam Presisi", qty: 5, unit: "Set", unitPrice: 18000000, total: 90000000 }
+        ],
+        totalAmount: 99900000,
+        status: "Diterima",
+        notes: "Sesuai dengan kesepakatan spesifikasi teknis BCI Matching."
+      }
+    ],
+    expenses: [
+      {
+        id: "exp_301",
+        expenseNumber: "EXP-2026-015",
+        category: "Sewa & Gedung",
+        vendorName: "PT SCBD Realty Land",
+        amount: 25000000,
+        date: "2026-07-05",
+        paymentAccount: "Bank BCA",
+        reference: "TRX-SCBD-9912",
+        description: "Sewa Ruang Kantor Operasional Lt. 12 Bulan Juli 2026",
+        status: "Disetujui"
+      },
+      {
+        id: "exp_302",
+        expenseNumber: "EXP-2026-016",
+        category: "Utilitas & Listrik",
+        vendorName: "PT PLN (Persero) Industri",
+        amount: 8500000,
+        date: "2026-07-11",
+        paymentAccount: "Bank Mandiri",
+        reference: "PLN-IND-77821",
+        description: "Tagihan Daya Listrik Pabrik 33.000 VA",
+        status: "Disetujui"
+      }
+    ],
+    items: [
+      {
+        id: "itm_401",
+        sku: "MCH-CNV-01",
+        name: "Mesin Conveyor Industri Otomatis",
+        type: "Barang",
+        unit: "Unit",
+        sellingPrice: 45000000,
+        costPrice: 32000000,
+        stockQty: 8,
+        taxRate: 11,
+        description: "Conveyor belt industri kecepatan tinggi VFD"
+      },
+      {
+        id: "itm_402",
+        sku: "SRV-ERP-SUB",
+        name: "Langganan Software Cloud ERP BCI",
+        type: "Jasa / Layanan",
+        unit: "Bulan",
+        sellingPrice: 3500000,
+        costPrice: 800000,
+        stockQty: 999,
+        taxRate: 11,
+        description: "Sistem ERP cloud instan terintegrasi perpajakan"
+      }
+    ],
+    contacts: [
+      {
+        id: "cnt_501",
+        name: "Budi Santoso",
+        companyName: "PT Telkom Indonesia",
+        type: "Pelanggan (Customer)",
+        email: "budi.santoso@telkom.co.id",
+        phone: "+628111234567",
+        address: "Telkom Landmark Tower, Jakarta Selatan",
+        npwp: "01.000.123.4-051.000",
+        balance: 46620000
+      },
+      {
+        id: "cnt_502",
+        name: "Andi Wijaya",
+        companyName: "CV Maju Bersama Teknik",
+        type: "Pemasok (Vendor)",
+        email: "sales@majubersamateknik.co.id",
+        phone: "+6281355556666",
+        address: "Kawasan Industri Rungkut, Surabaya",
+        npwp: "03.444.555.6-061.000",
+        balance: -15000000
+      }
+    ],
+    bankAccounts: [
+      {
+        id: "bnk_601",
+        accountName: "Rekening Utama Operasional",
+        bankName: "Bank BCA",
+        accountNumber: "8830-1293-88",
+        balance: 385400000,
+        accountType: "Bank Utama",
+        currency: "IDR"
+      },
+      {
+        id: "bnk_602",
+        accountName: "Rekening Kas & Payroll",
+        bankName: "Bank Mandiri",
+        accountNumber: "137-00-19283-11",
+        balance: 142000000,
+        accountType: "Bank Utama",
+        currency: "IDR"
+      },
+      {
+        id: "bnk_603",
+        accountName: "BCI Escrow Security Deposit",
+        bankName: "BCI Escrow Account",
+        accountNumber: "ESCROW-BCI-8899",
+        balance: 95000000,
+        accountType: "Escrow Account",
+        currency: "IDR"
+      }
+    ]
+  }
+};
+
+// Initialize DB file if not exists
+if (!fs.existsSync(DB_DIR)) {
+  fs.mkdirSync(DB_DIR);
+}
+if (!fs.existsSync(DB_FILE)) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(initialDatabase, null, 2));
+  console.log("Database file seeded.");
+}
+
+// Read database helper
+function readDB(): AppDatabase {
+  try {
+    const data = fs.readFileSync(DB_FILE, "utf-8");
+    return JSON.parse(data) as AppDatabase;
+  } catch (e) {
+    console.error("Failed to read database, resetting to seed...", e);
+    return initialDatabase;
+  }
+}
+
+// Write database helper
+function writeDB(data: AppDatabase) {
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error("Failed to write to database", e);
+  }
+}
+
+// Log action helper
+function addLog(user: string, action: string) {
+  const db = readDB();
+  db.auditLogs.unshift({
+    id: "log_" + Date.now(),
+    user,
+    action,
+    timestamp: new Date().toISOString()
+  });
+  // Keep last 100 logs
+  if (db.auditLogs.length > 100) {
+    db.auditLogs = db.auditLogs.slice(0, 100);
+  }
+  writeDB(db);
+}
+
+// --- API ROUTES ---
+
+// Auth Endpoints
+app.post("/api/auth/login", (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ success: false, error: "Email wajib diisi!" });
+  }
+
+  const db = readDB();
+  const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+
+  if (user) {
+    addLog(user.name, `Berhasil masuk portal BCI via ${user.email}`);
+    return res.json({ success: true, user });
+  } else {
+    return res.status(404).json({
+      success: false,
+      error: "Akun email tidak terdaftar di BCI. Silakan daftar terlebih dahulu!"
+    });
+  }
+});
+
+app.post("/api/auth/register", (req, res) => {
+  const { name, email, role, companyName, sector } = req.body;
+  if (!name || !email || !role) {
+    return res.status(400).json({ success: false, error: "Nama, email, dan peran wajib diisi!" });
+  }
+
+  const db = readDB();
+  const existingUser = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+  if (existingUser) {
+    return res.status(400).json({ success: false, error: "Email sudah terdaftar. Silakan masuk!" });
+  }
+
+  const newUserId = "usr_" + Date.now();
+  const defaultAvatars = [
+    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120",
+    "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=120",
+    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120",
+    "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120"
+  ];
+  const chosenAvatar = defaultAvatars[Math.floor(Math.random() * defaultAvatars.length)];
+
+  let createdCompanyId: string | undefined = undefined;
+
+  // Create company if relevant and requested
+  if (companyName && ["Perusahaan", "Supplier", "Vendor"].includes(role)) {
+    createdCompanyId = "comp_" + Date.now();
+    const newCompany: Company = {
+      id: createdCompanyId,
+      name: companyName,
+      logo: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=100",
+      cover: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=600",
+      sector: sector || "Kemitraan & Perdagangan",
+      description: `Perusahaan rintisan baru dalam ekosistem BCI yang bergerak di bidang ${sector || "Kemitraan & Perdagangan"}.`,
+      foundedYear: new Date().getFullYear(),
+      legality: {
+        nib: "912000" + Math.floor(100000 + Math.random() * 900000),
+        npwp: "01.000." + Math.floor(100000 + Math.random() * 900000) + ".4-051.000",
+        certificates: ["Sertifikasi BCI Verified"]
+      },
+      address: {
+        city: "Jakarta",
+        province: "DKI Jakarta",
+        fullAddress: "Gedung Cyber, Jl. Kuningan Barat",
+        mapsUrl: "https://maps.google.com"
+      },
+      contact: {
+        website: `https://www.${companyName.toLowerCase().replace(/[^a-z0-9]/g, "") || "perusahaan"}.co.id`,
+        email: `info@${companyName.toLowerCase().replace(/[^a-z0-9]/g, "") || "perusahaan"}.co.id`,
+        whatsapp: "+628123456789",
+        socialMedia: {}
+      },
+      videoProfileUrl: "",
+      photos: [],
+      portfolio: [],
+      products: [],
+      services: [],
+      employeesCount: 5,
+      isVerified: false,
+      rating: 5.0,
+      reviewsCount: 0,
+      followersCount: 0,
+      followedBy: []
+    };
+    db.companies.push(newCompany);
+  }
+
+  const newUser: User = {
+    id: newUserId,
+    name,
+    email: email.toLowerCase(),
+    role,
+    avatar: chosenAvatar,
+    companyId: createdCompanyId,
+    membership: "Gratis"
+  };
+
+  db.users.push(newUser);
+  writeDB(db);
+
+  addLog(newUser.name, `Mendaftarkan diri sebagai ${newUser.role} ${companyName ? `di ${companyName}` : ""}`);
+
+  res.json({ success: true, user: newUser });
+});
+
+// 1. Get entire DB state (sync)
+app.get("/api/db", (req, res) => {
+  const db = readDB();
+  res.json(db);
+});
+
+// Update user settings route
+app.post("/api/user/settings", (req, res) => {
+  const { userId, name, phone, password, language, avatar, position } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, error: "Missing userId" });
+  }
+
+  const db = readDB();
+  const userIndex = db.users.findIndex(u => u.id === userId);
+  if (userIndex === -1) {
+    return res.status(404).json({ success: false, error: "Pengguna tidak ditemukan" });
+  }
+
+  const updatedUser = {
+    ...db.users[userIndex],
+    name: name || db.users[userIndex].name,
+    phone: phone !== undefined ? phone : db.users[userIndex].phone,
+    password: password !== undefined ? password : db.users[userIndex].password,
+    language: language !== undefined ? language : db.users[userIndex].language,
+    avatar: avatar || db.users[userIndex].avatar,
+    position: position !== undefined ? position : db.users[userIndex].position
+  };
+
+  db.users[userIndex] = updatedUser;
+  writeDB(db);
+
+  addLog(updatedUser.name, "Memperbarui pengaturan akun (nomor telepon/password/bahasa)");
+
+  res.json({ success: true, user: updatedUser });
+});
+
+// Update or Create company settings route
+app.post("/api/company/settings", (req, res) => {
+  const { userId, companyId, companyData } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, error: "Missing userId" });
+  }
+
+  const db = readDB();
+  const userIndex = db.users.findIndex(u => u.id === userId);
+  if (userIndex === -1) {
+    return res.status(404).json({ success: false, error: "Pengguna tidak ditemukan" });
+  }
+
+  const user = db.users[userIndex];
+  let targetCompanyId = companyId || user.companyId;
+
+  let companyIndex = -1;
+  if (targetCompanyId) {
+    companyIndex = db.companies.findIndex(c => c.id === targetCompanyId);
+  }
+
+  if (companyIndex === -1) {
+    // Create new company profile
+    const newCompanyId = "comp_" + Date.now();
+    const newCompany = {
+      id: newCompanyId,
+      name: companyData.name || ("PT " + user.name + " Solusindo"),
+      logo: companyData.logo || "https://images.unsplash.com/photo-1614064641938-3bbee52942c7?auto=format&fit=crop&q=80&w=100",
+      cover: companyData.cover || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=600",
+      sector: companyData.sector || "Telekomunikasi & Teknologi",
+      description: companyData.description || "Profil Perusahaan Baru terdaftar di ekosistem BCI.",
+      foundedYear: Number(companyData.foundedYear) || new Date().getFullYear(),
+      legality: {
+        nib: companyData.legality?.nib || "9120001000000",
+        npwp: companyData.legality?.npwp || "00.000.000.0-000.000",
+        certificates: companyData.legality?.certificates || ["Sertifikasi Standardisasi Nasional"]
+      },
+      address: {
+        city: companyData.address?.city || "Jakarta",
+        province: companyData.address?.province || "DKI Jakarta",
+        fullAddress: companyData.address?.fullAddress || "Jl. Jendral Sudirman Kav. 52",
+        mapsUrl: companyData.address?.mapsUrl || "https://maps.google.com"
+      },
+      contact: {
+        website: companyData.contact?.website || "",
+        email: companyData.contact?.email || user.email,
+        whatsapp: companyData.contact?.whatsapp || "",
+        socialMedia: companyData.contact?.socialMedia || {}
+      },
+      videoProfileUrl: companyData.videoProfileUrl || "https://www.w3schools.com/html/mov_bbb.mp4",
+      photos: companyData.photos || [],
+      portfolio: companyData.portfolio || [
+        { title: "Rencana Pembangunan Infrastruktur B2B", description: "Penyusunan rencana layanan interkoneksi bisnis terpadu.", year: 2026 }
+      ],
+      products: companyData.products || [],
+      services: companyData.services || ["Konsultasi TI", "Solusi Enterprise"],
+      employeesCount: Number(companyData.employeesCount) || 10,
+      isVerified: true,
+      rating: 5.0,
+      reviewsCount: 1,
+      followersCount: 1,
+      followedBy: []
+    };
+
+    db.companies.push(newCompany);
+    user.companyId = newCompanyId;
+    writeDB(db);
+    addLog(user.name, `Membuat profil perusahaan baru: ${newCompany.name}`);
+    return res.json({ success: true, company: newCompany, user });
+  } else {
+    // Update existing company
+    const existingCompany = db.companies[companyIndex];
+    const updatedCompany = {
+      ...existingCompany,
+      name: companyData.name || existingCompany.name,
+      logo: companyData.logo || existingCompany.logo,
+      cover: companyData.cover || existingCompany.cover,
+      sector: companyData.sector || existingCompany.sector,
+      description: companyData.description || existingCompany.description,
+      foundedYear: Number(companyData.foundedYear) || existingCompany.foundedYear,
+      legality: {
+        nib: companyData.legality?.nib || existingCompany.legality.nib,
+        npwp: companyData.legality?.npwp || existingCompany.legality.npwp,
+        certificates: companyData.legality?.certificates || existingCompany.legality.certificates
+      },
+      address: {
+        city: companyData.address?.city || existingCompany.address.city,
+        province: companyData.address?.province || existingCompany.address.province,
+        fullAddress: companyData.address?.fullAddress || existingCompany.address.fullAddress,
+        mapsUrl: companyData.address?.mapsUrl || existingCompany.address.mapsUrl
+      },
+      contact: {
+        website: companyData.contact?.website || existingCompany.contact.website,
+        email: companyData.contact?.email || existingCompany.contact.email,
+        whatsapp: companyData.contact?.whatsapp || existingCompany.contact.whatsapp,
+        socialMedia: companyData.contact?.socialMedia || existingCompany.contact.socialMedia
+      },
+      videoProfileUrl: companyData.videoProfileUrl || existingCompany.videoProfileUrl,
+      photos: companyData.photos || existingCompany.photos,
+      portfolio: companyData.portfolio || existingCompany.portfolio,
+      products: companyData.products || existingCompany.products,
+      services: companyData.services || existingCompany.services,
+      employeesCount: Number(companyData.employeesCount) || existingCompany.employeesCount
+    };
+
+    db.companies[companyIndex] = updatedCompany;
+    writeDB(db);
+    addLog(user.name, `Memperbarui profil perusahaan: ${updatedCompany.name}`);
+    return res.json({ success: true, company: updatedCompany, user });
+  }
+});
+
+// 2. Chat messaging endpoint
+app.post("/api/chat/send", (req, res) => {
+  const { chatId, senderId, senderName, senderAvatar, message, file } = req.body;
+  if (!chatId || !senderId || !message) {
+    return res.status(400).json({ error: "Missing required parameters" });
+  }
+
+  const db = readDB();
+  const newMessage: ChatMessage = {
+    id: "msg_" + Date.now(),
+    chatId,
+    senderId,
+    senderName,
+    senderAvatar,
+    message,
+    file,
+    timestamp: new Date().toISOString(),
+    isRead: false
+  };
+
+  db.chatMessages.push(newMessage);
+  writeDB(db);
+  res.json(newMessage);
+});
+
+// 3. Create feed post
+app.post("/api/feed/post", (req, res) => {
+  const { authorId, authorName, authorRole, authorAvatar, authorCompany, type, title, content, mediaUrl, documentName, pollingOptions } = req.body;
+  if (!authorId || !content) {
+    return res.status(400).json({ error: "Author and content are required" });
+  }
+
+  const db = readDB();
+  const newPost: FeedPost = {
+    id: "feed_" + Date.now(),
+    authorId,
+    authorName,
+    authorRole,
+    authorAvatar,
+    authorCompany,
+    type,
+    title,
+    content,
+    mediaUrl,
+    documentName,
+    pollingOptions: pollingOptions ? pollingOptions.map((o: any, i: number) => ({ id: "opt_" + i + "_" + Date.now(), text: o.text, votes: [] })) : undefined,
+    likes: [],
+    comments: [],
+    sharesCount: 0,
+    repostsCount: 0,
+    isSavedBy: [],
+    timestamp: new Date().toISOString()
+  };
+
+  db.feedPosts.unshift(newPost);
+  writeDB(db);
+  addLog(authorName, `Membuat postingan feed baru: "${content.substring(0, 30)}..."`);
+  res.json(newPost);
+});
+
+// 4. Like / comment / save / vote feed post
+app.post("/api/feed/interact", (req, res) => {
+  const { postId, userId, userName, userAvatar, action, commentText, optionId, commentId } = req.body;
+  const db = readDB();
+  const post = db.feedPosts.find(p => p.id === postId);
+
+  if (!post) {
+    return res.status(404).json({ error: "Post not found" });
+  }
+
+  if (action === "like") {
+    if (post.likes.includes(userId)) {
+      post.likes = post.likes.filter(id => id !== userId);
+    } else {
+      post.likes.push(userId);
+    }
+  } else if (action === "comment" && commentText) {
+    post.comments.push({
+      id: "cmt_" + Date.now(),
+      authorName: userName || "User BCI",
+      authorAvatar: userAvatar || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=120",
+      content: commentText,
+      timestamp: new Date().toISOString(),
+      likes: [],
+      replies: []
+    });
+  } else if (action === "like_comment" && commentId) {
+    const comment = post.comments.find(c => c.id === commentId);
+    if (comment) {
+      if (!comment.likes) comment.likes = [];
+      if (comment.likes.includes(userId)) {
+        comment.likes = comment.likes.filter(id => id !== userId);
+      } else {
+        comment.likes.push(userId);
+      }
+    }
+  } else if (action === "reply_comment" && commentId && commentText) {
+    const comment = post.comments.find(c => c.id === commentId);
+    if (comment) {
+      if (!comment.replies) comment.replies = [];
+      comment.replies.push({
+        id: "reply_" + Date.now(),
+        authorName: userName || "User BCI",
+        authorAvatar: userAvatar || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=120",
+        content: commentText,
+        timestamp: new Date().toISOString()
+      });
+    }
+  } else if (action === "save") {
+    if (post.isSavedBy.includes(userId)) {
+      post.isSavedBy = post.isSavedBy.filter(id => id !== userId);
+    } else {
+      post.isSavedBy.push(userId);
+    }
+  } else if (action === "vote" && optionId && post.pollingOptions) {
+    // Remove vote from other options if they voted already, then add
+    post.pollingOptions.forEach(opt => {
+      opt.votes = opt.votes.filter(id => id !== userId);
+    });
+    const option = post.pollingOptions.find(o => o.id === optionId);
+    if (option) {
+      option.votes.push(userId);
+    }
+  } else if (action === "share") {
+    post.sharesCount++;
+  } else if (action === "repost") {
+    post.repostsCount++;
+  }
+
+  writeDB(db);
+  res.json(post);
+});
+
+// 5. Create News Article (SEO optimized)
+app.post("/api/news/post", (req, res) => {
+  const { title, category, summary, content, image, authorName, authorRole, seoKeywords, metaDescription } = req.body;
+  if (!title || !content || !category) {
+    return res.status(400).json({ error: "Missing title, content, or category" });
+  }
+
+  const db = readDB();
+  const newArticle: NewsArticle = {
+    id: "news_" + Date.now(),
+    title,
+    category,
+    summary,
+    content,
+    image: image || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=400",
+    authorName,
+    authorRole,
+    timestamp: new Date().toISOString(),
+    seoKeywords: seoKeywords || [category, "Business Connect Indonesia", "Berita Ekonomi"],
+    metaDescription: metaDescription || summary || "Berita bisnis BCI terpercaya.",
+    isModerated: false
+  };
+
+  db.newsArticles.unshift(newArticle);
+  writeDB(db);
+  addLog(authorName, `Menulis berita bisnis profesional: "${title}"`);
+  res.json(newArticle);
+});
+
+// 6. Marketplace add product/service
+app.post("/api/marketplace/add", (req, res) => {
+  const { companyId, companyName, companyLogo, category, name, price, unit, image, description, city, province } = req.body;
+  if (!companyId || !name || !price) {
+    return res.status(400).json({ error: "Missing required product details" });
+  }
+
+  const db = readDB();
+  const newProduct: B2BProduct = {
+    id: "prod_" + Date.now(),
+    companyId,
+    companyName,
+    companyLogo,
+    category,
+    name,
+    price: Number(price),
+    unit: unit || "Unit",
+    image: image || "https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&q=80&w=400",
+    description,
+    city: city || "Jakarta",
+    province: province || "DKI Jakarta",
+    rating: 5.0,
+    isVerified: true
+  };
+
+  db.marketplaceProducts.unshift(newProduct);
+  writeDB(db);
+  addLog(companyName, `Menambahkan produk baru ke Marketplace B2B: "${name}"`);
+  res.json(newProduct);
+});
+
+// 7. Create Tender
+app.post("/api/tender/create", (req, res) => {
+  const { companyId, companyName, companyLogo, title, value, deadline, requirements, location, description, isPremium } = req.body;
+  if (!companyId || !title || !value) {
+    return res.status(400).json({ error: "Missing required tender fields" });
+  }
+
+  const db = readDB();
+  const newTender: Tender = {
+    id: "tend_" + Date.now(),
+    companyId,
+    companyName,
+    companyLogo,
+    title,
+    value: Number(value),
+    deadline,
+    requirements: requirements || [],
+    location: location || "Jakarta",
+    description,
+    documents: ["Formulir_Spesifikasi_Teknis.pdf"],
+    proposals: [],
+    isPremium: !!isPremium,
+    status: "Buka"
+  };
+
+  db.tenders.unshift(newTender);
+  writeDB(db);
+  addLog(companyName, `Membuka tender baru bernilai Rp${Number(value).toLocaleString('id-ID')}: "${title}"`);
+  res.json(newTender);
+});
+
+// 8. Submit Proposal to Tender
+app.post("/api/tender/propose", (req, res) => {
+  const { tenderId, vendorId, vendorName, vendorLogo, budgetProposed, timeline, coverLetter } = req.body;
+  if (!tenderId || !vendorId || !budgetProposed) {
+    return res.status(400).json({ error: "Missing proposal details" });
+  }
+
+  const db = readDB();
+  const tender = db.tenders.find(t => t.id === tenderId);
+  if (!tender) {
+    return res.status(404).json({ error: "Tender not found" });
+  }
+
+  const newProposal = {
+    id: "prop_" + Date.now(),
+    vendorId,
+    vendorName,
+    vendorLogo,
+    budgetProposed: Number(budgetProposed),
+    timeline,
+    coverLetter,
+    status: "Pending" as const,
+    timestamp: new Date().toISOString()
+  };
+
+  tender.proposals.push(newProposal);
+  writeDB(db);
+  addLog(vendorName, `Mengirimkan proposal penawaran untuk tender: "${tender.title}"`);
+  res.json(tender);
+});
+
+// 9. Update Proposal Status
+app.post("/api/tender/proposal-status", (req, res) => {
+  const { tenderId, proposalId, status } = req.body;
+  const db = readDB();
+  const tender = db.tenders.find(t => t.id === tenderId);
+  if (!tender) return res.status(404).json({ error: "Tender not found" });
+
+  const proposal = tender.proposals.find(p => p.id === proposalId);
+  if (!proposal) return res.status(404).json({ error: "Proposal not found" });
+
+  proposal.status = status;
+  writeDB(db);
+  addLog("Sistem Tender", `Mengubah status proposal vendor "${proposal.vendorName}" menjadi ${status}`);
+  res.json(tender);
+});
+
+// 10. Sync Event to Google Calendar (Mock sync endpoint)
+app.post("/api/events/sync", (req, res) => {
+  const { eventId, userEmail } = req.body;
+  const db = readDB();
+  const event = db.events.find(e => e.id === eventId);
+  if (!event) return res.status(404).json({ error: "Event not found" });
+
+  event.isSynced = !event.isSynced; // Toggle sync status
+  writeDB(db);
+  res.json({ message: "Sinergi Kalender sukses!", event });
+});
+
+// 10.1 Add Custom Business Event / Schedule
+app.post("/api/events/add", (req, res) => {
+  const { title, type, date, time, location, description, organizer, image } = req.body;
+  if (!title || !date) return res.status(400).json({ error: "Judul dan Tanggal wajib diisi" });
+
+  const db = readDB();
+  const newEvent: BusinessEvent = {
+    id: "evt_" + Date.now(),
+    title,
+    type: type || 'Seminar',
+    date,
+    time: time || '10:00 - 12:00 WIB',
+    location: location || 'Jakarta / Online Zoom',
+    description: description || 'Agenda kegiatan bisnis tersinkronisasi BCI.',
+    organizer: organizer || 'Member BCI',
+    image: image || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?auto=format&fit=crop&q=80&w=400',
+    isSynced: false
+  };
+
+  db.events.unshift(newEvent);
+  writeDB(db);
+  addLog("Sistem Event", `Menambahkan agenda kegiatan bisnis baru: "${title}" (${date})`);
+  res.json(newEvent);
+});
+
+// 11. Create Forum Post or Comment
+app.post("/api/forum/post", (req, res) => {
+  const { category, authorName, authorAvatar, authorRole, title, content } = req.body;
+  if (!category || !title || !content) return res.status(400).json({ error: "Missing forum parameters" });
+
+  const db = readDB();
+  const newPost: ForumPost = {
+    id: "forum_" + Date.now(),
+    category,
+    authorName,
+    authorAvatar: authorAvatar || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=120",
+    authorRole,
+    title,
+    content,
+    likes: [],
+    comments: [],
+    timestamp: new Date().toISOString()
+  };
+
+  db.forumPosts.unshift(newPost);
+  writeDB(db);
+  addLog(authorName, `Membuat topik forum baru di kategori ${category}: "${title}"`);
+  res.json(newPost);
+});
+
+// 12. Forum Comment
+app.post("/api/forum/comment", (req, res) => {
+  const { postId, authorName, authorAvatar, authorRole, content } = req.body;
+  const db = readDB();
+  const post = db.forumPosts.find(p => p.id === postId);
+  if (!post) return res.status(404).json({ error: "Post not found" });
+
+  const newComment = {
+    id: "f_cmt_" + Date.now(),
+    authorName,
+    authorAvatar: authorAvatar || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=120",
+    authorRole,
+    content,
+    timestamp: new Date().toISOString()
+  };
+
+  post.comments.push(newComment);
+  writeDB(db);
+  res.json(post);
+});
+
+// 13. CRM Add/Edit Lead
+app.post("/api/crm/lead", (req, res) => {
+  const { id, companyId, contactName, email, phone, dealValue, stage, nextFollowUp, notes, source, sourceProductId } = req.body;
+  const db = readDB();
+
+  if (id) {
+    // Edit existing lead
+    const leadIndex = db.crmLeads.findIndex(l => l.id === id);
+    if (leadIndex !== -1) {
+      db.crmLeads[leadIndex] = {
+        ...db.crmLeads[leadIndex],
+        contactName,
+        email,
+        phone,
+        dealValue: Number(dealValue),
+        stage,
+        nextFollowUp,
+        notes,
+        source: source || db.crmLeads[leadIndex].source,
+        sourceProductId: sourceProductId || db.crmLeads[leadIndex].sourceProductId,
+        lastUpdated: new Date().toISOString()
+      };
+      writeDB(db);
+      res.json(db.crmLeads[leadIndex]);
+    } else {
+      res.status(404).json({ error: "Lead not found" });
+    }
+  } else {
+    // Create new lead
+    const newLead: CRMLead = {
+      id: "lead_" + Date.now(),
+      companyId: companyId || "comp_telkom",
+      contactName,
+      email,
+      phone,
+      dealValue: Number(dealValue) || 0,
+      stage: stage || "Prospect",
+      nextFollowUp: nextFollowUp || new Date().toISOString().split('T')[0],
+      notes: notes || "",
+      source: source || "Manual",
+      sourceProductId,
+      lastUpdated: new Date().toISOString()
+    };
+    db.crmLeads.unshift(newLead);
+    writeDB(db);
+    addLog(companyId || "CRM", `Menambahkan prospek penjualan baru (${newLead.source || 'CRM'}) untuk ${contactName}`);
+    res.json(newLead);
+  }
+});
+
+// Endpoint untuk Sinkronisasi Prospek dari Marketplace B2B ke CRM
+app.post("/api/crm/sync-marketplace-lead", (req, res) => {
+  const { productId, companyName, contactName, email, phone, dealValue, notes } = req.body;
+  const db = readDB();
+
+  // Check if lead already synced for this product
+  const existingLead = db.crmLeads.find(l => l.sourceProductId === productId);
+  if (existingLead) {
+    return res.json({ success: true, message: "Prospek sudah pernah disinkronkan sebelumnya.", lead: existingLead, isExisting: true });
+  }
+
+  const newLead: CRMLead = {
+    id: "lead_mp_" + Date.now(),
+    companyId: companyName || "Mitra Marketplace",
+    contactName: contactName || "Sales Representative",
+    email: email || "sales@bci.or.id",
+    phone: phone || "08123456789",
+    dealValue: Number(dealValue) || 10000000,
+    stage: "Prospect",
+    nextFollowUp: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0], // 7 days follow up
+    notes: notes || "Prospek otomatis disinkronkan dari Marketplace B2B Indonesia.",
+    source: "Marketplace B2B",
+    sourceProductId: productId,
+    lastUpdated: new Date().toISOString()
+  };
+
+  db.crmLeads.unshift(newLead);
+  writeDB(db);
+  addLog("Marketplace", `Sinkronisasi prospek B2B dari Marketplace ke CRM Sales Pipeline: ${companyName}`);
+  res.json({ success: true, message: "Berhasil disinkronkan ke CRM Sales Pipeline!", lead: newLead, isExisting: false });
+});
+
+// ==========================================
+// ZOHO BOOKS / BCI ACCOUNTING API ENDPOINTS
+// ==========================================
+app.post("/api/zoho-books/invoice", (req, res) => {
+  const invoiceData = req.body;
+  const db = readDB();
+  if (!db.zohoBooks) {
+    db.zohoBooks = {
+      invoices: [],
+      estimates: [],
+      expenses: [],
+      items: [],
+      contacts: [],
+      bankAccounts: []
+    };
+  }
+  const newInvoice = {
+    id: "inv_" + Date.now(),
+    ...invoiceData
+  };
+  db.zohoBooks.invoices.unshift(newInvoice);
+  writeDB(db);
+  addLog(invoiceData.customerCompany || "Accounting", `Membuat Faktur / Invoice baru: ${newInvoice.invoiceNumber}`);
+  res.json({ success: true, invoice: newInvoice });
+});
+
+app.put("/api/zoho-books/invoice/status", (req, res) => {
+  const { invoiceId, status } = req.body;
+  const db = readDB();
+  if (!db.zohoBooks) return res.status(404).json({ error: "No books data" });
+
+  const invoice = db.zohoBooks.invoices.find(i => i.id === invoiceId);
+  if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+
+  invoice.status = status;
+  if (status === 'Lunas') {
+    invoice.paidAmount = invoice.totalAmount;
+  }
+  writeDB(db);
+  addLog("Accounting", `Memperbarui status Invoice ${invoice.invoiceNumber} menjadi ${status}`);
+  res.json({ success: true, invoice });
+});
+
+app.post("/api/zoho-books/expense", (req, res) => {
+  const expenseData = req.body;
+  const db = readDB();
+  if (!db.zohoBooks) {
+    db.zohoBooks = { invoices: [], estimates: [], expenses: [], items: [], contacts: [], bankAccounts: [] };
+  }
+  const newExpense = {
+    id: "exp_" + Date.now(),
+    ...expenseData
+  };
+  db.zohoBooks.expenses.unshift(newExpense);
+  writeDB(db);
+  addLog("Accounting", `Mencatat Beban Pengeluaran Baru (${newExpense.category}): Rp${Number(newExpense.amount).toLocaleString('id-ID')}`);
+  res.json({ success: true, expense: newExpense });
+});
+
+app.post("/api/zoho-books/item", (req, res) => {
+  const itemData = req.body;
+  const db = readDB();
+  if (!db.zohoBooks) {
+    db.zohoBooks = { invoices: [], estimates: [], expenses: [], items: [], contacts: [], bankAccounts: [] };
+  }
+  const newItem = {
+    id: "itm_" + Date.now(),
+    ...itemData
+  };
+  db.zohoBooks.items.unshift(newItem);
+  writeDB(db);
+  addLog("Accounting", `Menambahkan barang/layanan baru ke katalog: ${newItem.name}`);
+  res.json({ success: true, item: newItem });
+});
+
+app.post("/api/zoho-books/contact", (req, res) => {
+  const contactData = req.body;
+  const db = readDB();
+  if (!db.zohoBooks) {
+    db.zohoBooks = { invoices: [], estimates: [], expenses: [], items: [], contacts: [], bankAccounts: [] };
+  }
+  const newContact = {
+    id: "cnt_" + Date.now(),
+    ...contactData
+  };
+  db.zohoBooks.contacts.unshift(newContact);
+  writeDB(db);
+  addLog("Accounting", `Menambahkan kontak B2B baru: ${newContact.companyName || newContact.name}`);
+  res.json({ success: true, contact: newContact });
+});
+
+// 14. Admin verification & moderation
+app.post("/api/admin/verify-company", (req, res) => {
+  const { companyId, isVerified } = req.body;
+  const db = readDB();
+  const company = db.companies.find(c => c.id === companyId);
+  if (!company) return res.status(404).json({ error: "Company not found" });
+
+  company.isVerified = isVerified;
+  writeDB(db);
+  addLog("Super Admin", `Memverifikasi status kepatuhan hukum perusahaan "${company.name}" menjadi ${isVerified}`);
+  res.json(company);
+});
+
+// 15. Follow / Unfollow Company
+app.post("/api/company/follow", (req, res) => {
+  const { companyId, userId } = req.body;
+  const db = readDB();
+  const company = db.companies.find(c => c.id === companyId);
+  if (!company) return res.status(404).json({ error: "Company not found" });
+
+  if (company.followedBy.includes(userId)) {
+    company.followedBy = company.followedBy.filter(id => id !== userId);
+    company.followersCount = Math.max(0, company.followersCount - 1);
+  } else {
+    company.followedBy.push(userId);
+    company.followersCount++;
+  }
+  writeDB(db);
+  res.json(company);
+});
+
+
+// ==========================================
+// 16. BUSINESS MATCHING AI (Gemini Grounded)
+// ==========================================
+app.post("/api/ai/matching", async (req, res) => {
+  const { companyId, targetSector, targetRegion } = req.body;
+  const db = readDB();
+  const currentCompany = db.companies.find(c => c.id === companyId);
+
+  if (!currentCompany) {
+    return res.status(404).json({ error: "Company not found" });
+  }
+
+  const otherCompanies = db.companies.filter(c => c.id !== companyId);
+  const ai = getAI();
+
+  if (!ai) {
+    // High-quality deterministic local engine fallback if Gemini is not configured yet
+    const matchingResults = otherCompanies.map(comp => {
+      let score = 50; // base score
+
+      // Matching sectors
+      if (comp.sector.toLowerCase().includes(currentCompany.sector.toLowerCase()) ||
+          currentCompany.sector.toLowerCase().includes(comp.sector.toLowerCase())) {
+        score += 25;
+      }
+
+      // Location match
+      if (comp.address.province === currentCompany.address.province) {
+        score += 15;
+      }
+      if (comp.address.city === currentCompany.address.city) {
+        score += 5;
+      }
+
+      // Legality weight
+      if (comp.isVerified) {
+        score += 5;
+      }
+
+      // Portfolio experience weight
+      score += Math.min(10, comp.portfolio.length * 4);
+
+      // Clamp score
+      score = Math.min(98, Math.max(45, score));
+
+      // Build specific Indonesian reasoning
+      let matchingReason = `Sektor ${comp.sector} sangat mendukung rantai suplai Anda. `;
+      if (comp.isVerified) {
+        matchingReason += `Legalitas NIB (${comp.legality.nib}) tervalidasi lengkap oleh Administrator BCI. `;
+      }
+      if (comp.address.province === currentCompany.address.province) {
+        matchingReason += `Berlokasi dekat di ${comp.address.city}, ${comp.address.province}, menghemat biaya logistik pengiriman.`;
+      } else {
+        matchingReason += `Meskipun berlokasi di ${comp.address.city}, mereka memiliki portofolio proyek nasional yang kuat.`;
+      }
+
+      return {
+        company: comp,
+        matchPercentage: score,
+        reason: matchingReason
+      };
+    });
+
+    return res.json({
+      matches: matchingResults.sort((a, b) => b.matchPercentage - a.matchPercentage),
+      aiGrounded: false,
+      message: "Menggunakan BCI Local Rule Engine. Konfigurasikan GEMINI_API_KEY di Secrets untuk pencocokan AI Kognitif penuh."
+    });
+  }
+
+  // Real Gemini Matching
+  try {
+    const prompt = `Anda adalah sistem Business Matching AI cerdas untuk platform Business Connect Indonesia (BCI).
+Tugas Anda adalah menilai persentase kecocokan kemitraan (skor 40-100) dan memberikan analisis bahasa Indonesia yang padat (maksimal 2 kalimat) antara Perusahaan Utama dengan daftar perusahaan lain.
+
+PERUSAHAAN UTAMA:
+Nama: ${currentCompany.name}
+Sektor: ${currentCompany.sector}
+Deskripsi: ${currentCompany.description}
+Lokasi: ${currentCompany.address.city}, ${currentCompany.address.province}
+Legalitas: Verified=${currentCompany.isVerified}
+
+DAFTAR PERUSAHAAN MITRA POTENSIAL:
+${otherCompanies.map((c, i) => `[ID: ${c.id}]
+Nama: ${c.name}
+Sektor: ${c.sector}
+Deskripsi: ${c.description}
+Lokasi: ${c.address.city}, ${c.address.province}
+Verified: ${c.isVerified}
+---`).join('\n')}
+
+Berikan keluaran dalam format JSON array yang persis seperti berikut:
+[
+  {
+    "companyId": "id_perusahaan",
+    "matchPercentage": 85,
+    "reason": "Penjelasan singkat dalam bahasa Indonesia mengapa perusahaan ini sangat cocok menjadi mitra berdasarkan sinergi sektor, kedekatan logistik di provinsi yang sama, dan sertifikasi hukum."
+  }
+]`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json"
+      }
+    });
+
+    const textOutput = response.text || "[]";
+    const parsed = JSON.parse(textOutput);
+
+    const matches = otherCompanies.map(comp => {
+      const aiMatch = parsed.find((m: any) => m.companyId === comp.id);
+      return {
+        company: comp,
+        matchPercentage: aiMatch ? aiMatch.matchPercentage : 65,
+        reason: aiMatch ? aiMatch.reason : `Sinergi bisnis potensial di bidang ${comp.sector}.`
+      };
+    }).sort((a, b) => b.matchPercentage - a.matchPercentage);
+
+    res.json({
+      matches,
+      aiGrounded: true
+    });
+  } catch (err: any) {
+    console.error("Gemini Matching AI Error:", err);
+    res.status(500).json({ error: "Sistem AI sibuk, silakan coba beberapa saat lagi." });
+  }
+});
+
+
+// ==========================================
+// 16.1 SMART TENDER MATCHING AI
+// ==========================================
+app.post("/api/ai/smart-tender-match", async (req, res) => {
+  const { companyId } = req.body;
+  const db = readDB();
+  const currentCompany = db.companies.find(c => c.id === companyId) || db.companies[0];
+
+  const tenders = db.tenders;
+  const ai = getAI();
+
+  if (!ai) {
+    // High-quality local matching engine fallback
+    const matches = tenders.map(tender => {
+      let score = 60; // base score
+      let reasons: string[] = [];
+
+      const companySectorLower = currentCompany.sector.toLowerCase();
+      const tenderTitleLower = tender.title.toLowerCase();
+      const tenderDescLower = tender.description.toLowerCase();
+
+      const sectorKeywords = companySectorLower.split(/[\s&/]+/);
+      const isSectorMatched = sectorKeywords.some(kw => kw.length > 3 && (tenderTitleLower.includes(kw) || tenderDescLower.includes(kw)));
+
+      if (isSectorMatched) {
+        score += 26;
+        reasons.push(`Sesuai Klasifikasi KBLI Sektor ${currentCompany.sector}`);
+      } else {
+        score += 12;
+        reasons.push("Sinergi Multidisiplin Lintas Sektor Industri");
+      }
+
+      if (currentCompany.isVerified) {
+        score += 8;
+        reasons.push("Legalitas NIB & Sertifikasi TKDN Terverifikasi BCI");
+      }
+
+      if (tender.value <= 10000000000) {
+        score += 5;
+        reasons.push("Pagu Anggaran Sesuai Kapasitas Lisensi Vendor");
+      }
+
+      score = Math.min(99, Math.max(55, score));
+
+      return {
+        tenderId: tender.id,
+        matchPercentage: score,
+        fitLevel: score >= 90 ? 'Sangat Tinggi' : score >= 75 ? 'Tinggi' : 'Cukup',
+        reasons,
+        aiSummary: `Proyek "${tender.title}" memiliki tingkat kompatibilitas ${score}%. Profil PT ${currentCompany.name} (${currentCompany.sector}) memenuhi kualifikasi utama.`
+      };
+    }).sort((a, b) => b.matchPercentage - a.matchPercentage);
+
+    return res.json({ matches, aiGrounded: false });
+  }
+
+  try {
+    const prompt = `Anda adalah sistem Smart Tender Matching AI BCI. Evaluasi tingkat kecocokan profil perusahaan vendor dengan daftar tender proyek berikut (skor 50-99).
+
+PERUSAHAAN VENDOR:
+Nama: ${currentCompany.name}
+Sektor: ${currentCompany.sector}
+Deskripsi: ${currentCompany.description}
+Legalitas: NIB=${currentCompany.legality?.nib || "9120001234567"}, Verified=${currentCompany.isVerified}
+
+DAFTAR TENDER PROYEK:
+${tenders.map(t => `[ID: ${t.id}]
+Judul: ${t.title}
+Penyelenggara: ${t.companyName}
+Nilai Pagu: Rp${t.value}
+Persyaratan: ${t.requirements.join(', ')}
+Deskripsi: ${t.description}`).join('\n---\n')}
+
+Berikan keluaran JSON array persis seperti format berikut:
+[
+  {
+    "tenderId": "id_tender",
+    "matchPercentage": 95,
+    "fitLevel": "Sangat Tinggi",
+    "reasons": ["Sesuai Sektor KBLI", "Kualifikasi TKDN Terpenuhi", "Izin Operasional Sesuai"],
+    "aiSummary": "Rangkuman ringkas 1-2 kalimat mengapa proyek ini sangat direkomendasikan untuk vendor ini."
+  }
+]`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: { responseMimeType: "application/json" }
+    });
+
+    const parsed = JSON.parse(response.text || "[]");
+    res.json({ matches: parsed, aiGrounded: true });
+  } catch (err: any) {
+    console.error("Smart Tender Match Error:", err);
+    res.status(500).json({ error: "Gagal analisis Smart Tender Matching" });
+  }
+});
+
+
+// ==========================================
+// 17. AI ASSISTANT (Proposal, SWOT, Kontrak, etc.)
+// ==========================================
+app.post("/api/ai/assistant", async (req, res) => {
+  const { type, companyName, sector, promptDetail, additionalNotes } = req.body;
+  if (!type || !companyName) {
+    return res.status(400).json({ error: "Missing required parameters" });
+  }
+
+  const ai = getAI();
+  const requestPrompt = `Anda adalah AI Assistant Bisnis Profesional untuk platform Business Connect Indonesia (BCI).
+Tugas Anda adalah memformulasikan dokumen bisnis korporat premium berkualitas tinggi dalam Bahasa Indonesia formal terstruktur dengan visual Markdown yang sangat rapi (menggunakan header, tebal, list, tabel jika diperlukan).
+
+Jenis Dokumen yang Diminta: ${type}
+Nama Perusahaan Pemohon: ${companyName}
+Sektor Bisnis: ${sector || "Umum"}
+Instruksi Tambahan / Detail Kebutuhan: ${promptDetail || "Buatkan draf standar profesional"}
+Catatan Sampingan: ${additionalNotes || "-"}
+
+Harap hasilkan dokumen lengkap yang siap pakai, meliputi pembuka formal, bagian utama yang terperinci (pasal demi pasal jika itu Kontrak/NDA, atau poin tindakan nyata jika SWOT/Business Plan), serta penutup. Jangan sertakan teks instruksi pembuka atau komentar tambahan selain isi dokumennya sendiri.`;
+
+  if (!ai) {
+    // Generate a beautiful Indonesian template on fallback
+    let docContent = "";
+    const dateStr = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    if (type === "SWOT") {
+      docContent = `# ANALISIS SWOT EKSEKUTIF: ${companyName.toUpperCase()}
+*Disiapkan secara otomatis oleh BCI Local Business Intelligence Engine*
+*Tanggal: ${dateStr}*
+
+### 1. STRENGTHS (Kekuatan Internal)
+*   **Keunggulan Operasional Lokal**: Pemahaman mendalam tentang pasar industri ${sector || "Indonesia"}.
+*   **Kepatuhan Hukum & TKDN**: Integritas legalitas lengkap dan kepatuhan NIB aktif yang diakui platform nasional.
+*   **Agilitas Layanan**: Kemampuan kustomisasi produk/layanan B2B secara responsif dibandingkan kompetitor impor.
+
+### 2. WEAKNESSES (Kelemahan Internal)
+*   **Keterbatasan Penetrasi Digital**: Memerlukan akselerasi adopsi otomatisasi ERP/SaaS untuk efisiensi rantai suplai.
+*   **Keterbatasan Skala Modal**: Kapasitas ekspansi masih sangat bergantung pada modal ventura atau sindikasi investor premium.
+
+### 3. OPPORTUNITIES (Peluang Eksternal)
+*   **Sinergi Tender BUMN & IKN**: Kebijakan pemerintah yang mewajibkan TKDN tinggi membuka gerbang kolaborasi proyek berskala nasional.
+*   **Pasar Ekspor Regional**: Sektor ${sector || "industri terkait"} Indonesia memiliki keunggulan kompetitif di kawasan ASEAN.
+
+### 4. THREATS (Ancaman Eksternal)
+*   **Fluktuasi Suku Bunga & Inflasi**: Mengancam stabilitas cashflow belanja modal alat berat dan material.
+*   **Persaingan Tarif Agresif**: Masuknya penyedia jasa global dengan modal skala raksasa.
+
+---
+*Catatan: Konfigurasikan GEMINI_API_KEY di panel Secrets BCI untuk menghasilkan analisis prediktif berbasis real-time market data.*`;
+    } else if (type === "NDA" || type === "Kontrak") {
+      docContent = `# SURAT PERJANJIAN KERAHASIAAN (NON-DISCLOSURE AGREEMENT)
+**Nomor: NDA/${companyName.substring(0,4).toUpperCase()}/${new Date().getFullYear()}/089**
+
+Perjanjian Kerahasiaan ini ("Perjanjian") dibuat pada hari ini, tanggal ${dateStr}, oleh dan antara:
+1.  **${companyName}**, sebuah entitas bisnis yang bergerak di bidang ${sector || "Umum"}, berkedudukan hukum di Indonesia (selanjutnya disebut sebagai **"Pihak Pengungkap"**).
+2.  **Mitra Kolaborasi Strategis Business Connect Indonesia** (selanjutnya disebut sebagai **"Pihak Penerima"**).
+
+### PASAL 1: DEFINISI INFORMASI RAHASIA
+"Informasi Rahasia" mencakup semua data bisnis, rahasia dagang, rencana pemasaran, algoritma software, spesifikasi teknis mesin, daftar pelanggan, informasi keuangan, dan data tender yang diungkapkan baik secara tertulis maupun lisan selama masa kolaborasi.
+
+### PASAL 2: KEWAJIBAN NON-DISKLOSUR
+Pihak Penerima setuju untuk menjaga kerahasiaan penuh atas Informasi Rahasia dan tidak akan membocorkannya kepada pihak ketiga mana pun tanpa persetujuan tertulis sebelumnya dari Pihak Pengungkap.
+
+### PASAL 3: SANKSI DAN GANTI RUGI
+Pelanggaran terhadap Perjanjian ini akan dikenakan sanksi ganti rugi material sesuai dengan ketentuan hukum perdata Republik Indonesia yang berlaku, serta pemutusan keanggotaan BCI Enterprise secara sepihak.
+
+---
+**Pihak Pengungkap**                      **Pihak Penerima**
+*(Tandatangan Digital)*                  *(Tandatangan Digital)*`;
+    } else {
+      docContent = `# DRAF DOKUMEN BISNIS PREMIUM: ${type.toUpperCase()}
+*Entitas: ${companyName} (${sector || "Umum"})*
+*Dibuat pada: ${dateStr}*
+
+### RINGKASAN EKSEKUTIF
+Dokumen ini disusun untuk menindaklanjuti kebutuhan kolaborasi strategis dalam platform Business Connect Indonesia. Kami berkomitmen untuk menghadirkan keunggulan kompetitif, kualitas operasional tinggi, serta kepatuhan penuh terhadap standar industri nasional.
+
+### BUTIR PENAWARAN & TUJUAN
+*   **Kualitas & Kepatuhan**: Mengedepankan integrasi sistematis untuk efisiensi waktu hingga 30%.
+*   **Estimasi Anggaran**: Penawaran harga bersifat fleksibel dengan syarat pembayaran yang disesuaikan (termin/L/C).
+*   **Dukungan Penuh**: Garansi instalasi, pelatihan SDM, dan pemeliharaan rutin.
+
+---
+*Draf ini adalah draf dasar instan. Aktifkan koneksi AI Gemini Anda di Secrets untuk menulis proposal yang dipersonalisasi secara kognitif mendalam.*`;
+    }
+
+    return res.json({
+      document: docContent,
+      aiGrounded: false,
+      message: "Menggunakan template dokumen terstruktur BCI. Hubungkan GEMINI_API_KEY untuk kecerdasan sintesis draf penuh."
+    });
+  }
+
+  // Real Gemini Generator
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: requestPrompt
+    });
+
+    res.json({
+      document: response.text || "Gagal membuat dokumen.",
+      aiGrounded: true
+    });
+  } catch (err: any) {
+    console.error("Gemini AI Assistant Error:", err);
+    res.status(500).json({ error: "Gagal menghubungkan ke Gemini AI: " + err.message });
+  }
+});
+
+
+// --- VITE MIDDLEWARE FOR DEVELOPMENT AND PRODUCTION STATIC HOSTING ---
+async function startServer() {
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Business Connect Indonesia Server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();

@@ -1,0 +1,6 @@
+{
+  "name": "Business Connect Indonesia",
+  "description": "Platform digital kolaborasi, business matching AI, B2B marketplace, tender, dan jaringan bisnis untuk pengusaha, UMKM, investor, dan instansi di Indonesia.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
