@@ -233,10 +233,11 @@ export default function AdminDashboardView({
 
           <div className="space-y-1.5 text-[11px] leading-relaxed max-h-72 overflow-y-auto">
             <p className="text-slate-500">[2026-07-16 13:14:01] System booted. Ports 3000 mapped for ingress gateway.</p>
-            <p className="text-slate-500">[2026-07-16 13:14:02] Connected to database: /data/db.json</p>
-            <p className="text-[#FFC107] font-black">[2026-07-16 13:14:05] GEMINI SDK - Pro model alias active for cognitively grounded AI Matching.</p>
+            <p className="text-emerald-400 font-black">[2026-07-16 13:14:02] Vercel Serverless Ready: Route /api/(.*) {"->"} api/index.ts</p>
+            <p className="text-[#FFC107] font-black">[2026-07-16 13:14:05] GEMINI SDK (gemini-2.5-flash) - Active on Vercel Serverless Functions.</p>
             <p className="text-blue-400">[2026-07-16 13:14:12] Router: Registered API endpoint /api/ai/matching</p>
-            <p className="text-blue-400">[2026-07-16 13:14:15] Router: Registered API endpoint /api/ai/assistant</p>
+            <p className="text-blue-400">[2026-07-16 13:14:15] Router: Registered API endpoint /api/ai/smart-tender-match</p>
+            <p className="text-blue-400">[2026-07-16 13:14:18] Router: Registered API endpoint /api/ai/assistant</p>
             <p className="text-slate-400">[2026-07-16 13:21:44] Chat: Sent message usr_1_comp_telkom to CV Maju Bersama.</p>
             <p className="text-[#FF6B00] font-black">[2026-07-16 13:22:15] Security Audit: Legality verification compliance check requested.</p>
             <p className="text-emerald-400">[2026-07-16 13:25:31] AI Grounding Engine: Recalculated 3 matrix scores successfully in 2.1s.</p>

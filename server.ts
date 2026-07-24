@@ -11,29 +11,34 @@ const PORT = 3000;
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Path to JSON database
-const DB_DIR = path.join(process.cwd(), "data");
+// Path to JSON database (supports Vercel serverless /tmp and local)
+const isVercelEnv = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const DB_DIR = isVercelEnv ? "/tmp" : path.join(process.cwd(), "data");
 const DB_FILE = path.join(DB_DIR, "db.json");
 
-// Safe lazy-initialization of Gemini client
+let memoryDb: AppDatabase | null = null;
+
+// Safe lazy-initialization of Gemini client for Vercel & Node environments
 let aiClient: any = null;
 function getAI() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
+    return null;
+  }
   if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey && apiKey !== "MY_GEMINI_API_KEY" && apiKey.trim() !== "") {
-      try {
-        aiClient = new GoogleGenAI({
-          apiKey: apiKey,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            }
+    try {
+      aiClient = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build-vercel',
           }
-        });
-        console.log("Gemini AI Client initialized successfully.");
-      } catch (e) {
-        console.error("Failed to initialize Gemini AI Client:", e);
-      }
+        }
+      });
+      console.log("Gemini AI Client initialized successfully for Vercel/Cloud runtime.");
+    } catch (e) {
+      console.error("Failed to initialize Gemini AI Client:", e);
+      return null;
     }
   }
   return aiClient;
@@ -680,18 +685,33 @@ if (!fs.existsSync(DB_FILE)) {
 
 // Read database helper
 function readDB(): AppDatabase {
+  if (memoryDb) return memoryDb;
   try {
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(DB_FILE)) {
+      fs.writeFileSync(DB_FILE, JSON.stringify(initialDatabase, null, 2));
+      memoryDb = initialDatabase;
+      return initialDatabase;
+    }
     const data = fs.readFileSync(DB_FILE, "utf-8");
-    return JSON.parse(data) as AppDatabase;
+    memoryDb = JSON.parse(data) as AppDatabase;
+    return memoryDb;
   } catch (e) {
     console.error("Failed to read database, resetting to seed...", e);
-    return initialDatabase;
+    memoryDb = memoryDb || initialDatabase;
+    return memoryDb;
   }
 }
 
 // Write database helper
 function writeDB(data: AppDatabase) {
+  memoryDb = data;
   try {
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true });
+    }
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
   } catch (e) {
     console.error("Failed to write to database", e);
@@ -1630,7 +1650,7 @@ Berikan keluaran dalam format JSON array yang persis seperti berikut:
 ]`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -1745,7 +1765,7 @@ Berikan keluaran JSON array persis seperti format berikut:
 ]`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
@@ -1856,7 +1876,7 @@ Dokumen ini disusun untuk menindaklanjuti kebutuhan kolaborasi strategis dalam p
   // Real Gemini Generator
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: requestPrompt
     });
 
@@ -1892,4 +1912,8 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;
