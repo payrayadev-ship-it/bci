@@ -881,113 +881,119 @@ app.post("/api/user/settings", (req, res) => {
 
 // Update or Create company settings route
 app.post("/api/company/settings", (req, res) => {
-  const { userId, companyId, companyData } = req.body;
-  if (!userId) {
-    return res.status(400).json({ success: false, error: "Missing userId" });
-  }
+  try {
+    const { userId, companyId } = req.body || {};
+    const companyData = req.body?.companyData || {};
+    if (!userId) {
+      return res.status(400).json({ success: false, error: "Missing userId" });
+    }
 
-  const db = readDB();
-  const userIndex = db.users.findIndex(u => u.id === userId);
-  if (userIndex === -1) {
-    return res.status(404).json({ success: false, error: "Pengguna tidak ditemukan" });
-  }
+    const db = readDB();
+    const userIndex = db.users.findIndex(u => u.id === userId);
+    if (userIndex === -1) {
+      return res.status(404).json({ success: false, error: "Pengguna tidak ditemukan" });
+    }
 
-  const user = db.users[userIndex];
-  let targetCompanyId = companyId || user.companyId;
+    const user = db.users[userIndex];
+    let targetCompanyId = companyId || user.companyId;
 
-  let companyIndex = -1;
-  if (targetCompanyId) {
-    companyIndex = db.companies.findIndex(c => c.id === targetCompanyId);
-  }
+    let companyIndex = -1;
+    if (targetCompanyId) {
+      companyIndex = db.companies.findIndex(c => c.id === targetCompanyId);
+    }
 
-  if (companyIndex === -1) {
-    // Create new company profile
-    const newCompanyId = "comp_" + Date.now();
-    const newCompany = {
-      id: newCompanyId,
-      name: companyData.name || ("PT " + user.name + " Solusindo"),
-      logo: companyData.logo || "https://images.unsplash.com/photo-1614064641938-3bbee52942c7?auto=format&fit=crop&q=80&w=100",
-      cover: companyData.cover || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=600",
-      sector: companyData.sector || "Telekomunikasi & Teknologi",
-      description: companyData.description || "Profil Perusahaan Baru terdaftar di ekosistem BCI.",
-      foundedYear: Number(companyData.foundedYear) || new Date().getFullYear(),
-      legality: {
-        nib: companyData.legality?.nib || "9120001000000",
-        npwp: companyData.legality?.npwp || "00.000.000.0-000.000",
-        certificates: companyData.legality?.certificates || ["Sertifikasi Standardisasi Nasional"]
-      },
-      address: {
-        city: companyData.address?.city || "Jakarta",
-        province: companyData.address?.province || "DKI Jakarta",
-        fullAddress: companyData.address?.fullAddress || "Jl. Jendral Sudirman Kav. 52",
-        mapsUrl: companyData.address?.mapsUrl || "https://maps.google.com"
-      },
-      contact: {
-        website: companyData.contact?.website || "",
-        email: companyData.contact?.email || user.email,
-        whatsapp: companyData.contact?.whatsapp || "",
-        socialMedia: companyData.contact?.socialMedia || {}
-      },
-      videoProfileUrl: companyData.videoProfileUrl || "https://www.w3schools.com/html/mov_bbb.mp4",
-      photos: companyData.photos || [],
-      portfolio: companyData.portfolio || [
-        { title: "Rencana Pembangunan Infrastruktur B2B", description: "Penyusunan rencana layanan interkoneksi bisnis terpadu.", year: 2026 }
-      ],
-      products: companyData.products || [],
-      services: companyData.services || ["Konsultasi TI", "Solusi Enterprise"],
-      employeesCount: Number(companyData.employeesCount) || 10,
-      isVerified: true,
-      rating: 5.0,
-      reviewsCount: 1,
-      followersCount: 1,
-      followedBy: []
-    };
+    if (companyIndex === -1) {
+      // Create new company profile
+      const newCompanyId = "comp_" + Date.now();
+      const newCompany = {
+        id: newCompanyId,
+        name: companyData.name || ("PT " + user.name + " Solusindo"),
+        logo: companyData.logo || "https://images.unsplash.com/photo-1614064641938-3bbee52942c7?auto=format&fit=crop&q=80&w=100",
+        cover: companyData.cover || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=600",
+        sector: companyData.sector || "Telekomunikasi & Teknologi",
+        description: companyData.description || "Profil Perusahaan Baru terdaftar di ekosistem BCI.",
+        foundedYear: Number(companyData.foundedYear) || new Date().getFullYear(),
+        legality: {
+          nib: companyData.legality?.nib || "9120001000000",
+          npwp: companyData.legality?.npwp || "00.000.000.0-000.000",
+          certificates: companyData.legality?.certificates || ["Sertifikasi Standardisasi Nasional"]
+        },
+        address: {
+          city: companyData.address?.city || "Jakarta",
+          province: companyData.address?.province || "DKI Jakarta",
+          fullAddress: companyData.address?.fullAddress || "Jl. Jendral Sudirman Kav. 52",
+          mapsUrl: companyData.address?.mapsUrl || "https://maps.google.com"
+        },
+        contact: {
+          website: companyData.contact?.website || "",
+          email: companyData.contact?.email || user.email,
+          whatsapp: companyData.contact?.whatsapp || "",
+          socialMedia: companyData.contact?.socialMedia || {}
+        },
+        videoProfileUrl: companyData.videoProfileUrl || "https://www.w3schools.com/html/mov_bbb.mp4",
+        photos: companyData.photos || [],
+        portfolio: companyData.portfolio || [
+          { title: "Rencana Pembangunan Infrastruktur B2B", description: "Penyusunan rencana layanan interkoneksi bisnis terpadu.", year: 2026 }
+        ],
+        products: companyData.products || [],
+        services: companyData.services || ["Konsultasi TI", "Solusi Enterprise"],
+        employeesCount: Number(companyData.employeesCount) || 10,
+        isVerified: true,
+        rating: 5.0,
+        reviewsCount: 1,
+        followersCount: 1,
+        followedBy: []
+      };
 
-    db.companies.push(newCompany);
-    user.companyId = newCompanyId;
-    writeDB(db);
-    addLog(user.name, `Membuat profil perusahaan baru: ${newCompany.name}`);
-    return res.json({ success: true, company: newCompany, user });
-  } else {
-    // Update existing company
-    const existingCompany = db.companies[companyIndex];
-    const updatedCompany = {
-      ...existingCompany,
-      name: companyData.name || existingCompany.name,
-      logo: companyData.logo || existingCompany.logo,
-      cover: companyData.cover || existingCompany.cover,
-      sector: companyData.sector || existingCompany.sector,
-      description: companyData.description || existingCompany.description,
-      foundedYear: Number(companyData.foundedYear) || existingCompany.foundedYear,
-      legality: {
-        nib: companyData.legality?.nib || existingCompany.legality.nib,
-        npwp: companyData.legality?.npwp || existingCompany.legality.npwp,
-        certificates: companyData.legality?.certificates || existingCompany.legality.certificates
-      },
-      address: {
-        city: companyData.address?.city || existingCompany.address.city,
-        province: companyData.address?.province || existingCompany.address.province,
-        fullAddress: companyData.address?.fullAddress || existingCompany.address.fullAddress,
-        mapsUrl: companyData.address?.mapsUrl || existingCompany.address.mapsUrl
-      },
-      contact: {
-        website: companyData.contact?.website || existingCompany.contact.website,
-        email: companyData.contact?.email || existingCompany.contact.email,
-        whatsapp: companyData.contact?.whatsapp || existingCompany.contact.whatsapp,
-        socialMedia: companyData.contact?.socialMedia || existingCompany.contact.socialMedia
-      },
-      videoProfileUrl: companyData.videoProfileUrl || existingCompany.videoProfileUrl,
-      photos: companyData.photos || existingCompany.photos,
-      portfolio: companyData.portfolio || existingCompany.portfolio,
-      products: companyData.products || existingCompany.products,
-      services: companyData.services || existingCompany.services,
-      employeesCount: Number(companyData.employeesCount) || existingCompany.employeesCount
-    };
+      db.companies.push(newCompany);
+      user.companyId = newCompanyId;
+      writeDB(db);
+      addLog(user.name, `Membuat profil perusahaan baru: ${newCompany.name}`);
+      return res.json({ success: true, company: newCompany, user });
+    } else {
+      // Update existing company
+      const existingCompany = db.companies[companyIndex];
+      const updatedCompany = {
+        ...existingCompany,
+        name: companyData.name || existingCompany.name,
+        logo: companyData.logo || existingCompany.logo,
+        cover: companyData.cover || existingCompany.cover,
+        sector: companyData.sector || existingCompany.sector,
+        description: companyData.description || existingCompany.description,
+        foundedYear: Number(companyData.foundedYear) || existingCompany.foundedYear,
+        legality: {
+          nib: companyData.legality?.nib || existingCompany.legality.nib,
+          npwp: companyData.legality?.npwp || existingCompany.legality.npwp,
+          certificates: companyData.legality?.certificates || existingCompany.legality.certificates
+        },
+        address: {
+          city: companyData.address?.city || existingCompany.address.city,
+          province: companyData.address?.province || existingCompany.address.province,
+          fullAddress: companyData.address?.fullAddress || existingCompany.address.fullAddress,
+          mapsUrl: companyData.address?.mapsUrl || existingCompany.address.mapsUrl
+        },
+        contact: {
+          website: companyData.contact?.website || existingCompany.contact.website,
+          email: companyData.contact?.email || existingCompany.contact.email,
+          whatsapp: companyData.contact?.whatsapp || existingCompany.contact.whatsapp,
+          socialMedia: companyData.contact?.socialMedia || existingCompany.contact.socialMedia
+        },
+        videoProfileUrl: companyData.videoProfileUrl || existingCompany.videoProfileUrl,
+        photos: companyData.photos || existingCompany.photos,
+        portfolio: companyData.portfolio || existingCompany.portfolio,
+        products: companyData.products || existingCompany.products,
+        services: companyData.services || existingCompany.services,
+        employeesCount: Number(companyData.employeesCount) || existingCompany.employeesCount
+      };
 
-    db.companies[companyIndex] = updatedCompany;
-    writeDB(db);
-    addLog(user.name, `Memperbarui profil perusahaan: ${updatedCompany.name}`);
-    return res.json({ success: true, company: updatedCompany, user });
+      db.companies[companyIndex] = updatedCompany;
+      writeDB(db);
+      addLog(user.name, `Memperbarui profil perusahaan: ${updatedCompany.name}`);
+      return res.json({ success: true, company: updatedCompany, user });
+    }
+  } catch (err: any) {
+    console.error("Error updating company settings:", err);
+    return res.status(500).json({ success: false, error: "Gagal menyimpan pengaturan perusahaan" });
   }
 });
 
