@@ -1549,79 +1549,196 @@ app.post("/api/company/follow", (req, res) => {
 });
 
 
+// Helper function to safely clean and parse JSON from Gemini text output
+function cleanAndParseJSON(text: string | undefined | null, fallback: any = []) {
+  if (!text) return fallback;
+  try {
+    const cleaned = text
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.warn("Failed to parse Gemini JSON output:", e);
+    return fallback;
+  }
+}
+
+// Fallback Generators
+function getMatchingFallback(currentCompany: Company, otherCompanies: Company[]) {
+  const matchingResults = otherCompanies.map(comp => {
+    let score = 50;
+    if (comp.sector.toLowerCase().includes(currentCompany.sector.toLowerCase()) ||
+        currentCompany.sector.toLowerCase().includes(comp.sector.toLowerCase())) {
+      score += 25;
+    }
+    if (comp.address.province === currentCompany.address.province) score += 15;
+    if (comp.address.city === currentCompany.address.city) score += 5;
+    if (comp.isVerified) score += 5;
+    score += Math.min(10, comp.portfolio.length * 4);
+    score = Math.min(98, Math.max(45, score));
+
+    let matchingReason = `Sektor ${comp.sector} sangat mendukung rantai suplai Anda. `;
+    if (comp.isVerified) {
+      matchingReason += `Legalitas NIB (${comp.legality.nib}) tervalidasi lengkap oleh Administrator BCI. `;
+    }
+    if (comp.address.province === currentCompany.address.province) {
+      matchingReason += `Berlokasi dekat di ${comp.address.city}, ${comp.address.province}, menghemat biaya logistik pengiriman.`;
+    } else {
+      matchingReason += `Meskipun berlokasi di ${comp.address.city}, mereka memiliki portofolio proyek nasional yang kuat.`;
+    }
+
+    return {
+      company: comp,
+      matchPercentage: score,
+      reason: matchingReason
+    };
+  });
+
+  return {
+    matches: matchingResults.sort((a, b) => b.matchPercentage - a.matchPercentage),
+    aiGrounded: false,
+    message: "Menggunakan BCI Local Rule Engine."
+  };
+}
+
+function getTenderMatchingFallback(currentCompany: Company, tenders: any[]) {
+  const matches = tenders.map(tender => {
+    let score = 60;
+    let reasons: string[] = [];
+    const companySectorLower = currentCompany.sector.toLowerCase();
+    const tenderTitleLower = tender.title.toLowerCase();
+    const tenderDescLower = tender.description.toLowerCase();
+    const sectorKeywords = companySectorLower.split(/[\s&/]+/);
+    const isSectorMatched = sectorKeywords.some(kw => kw.length > 3 && (tenderTitleLower.includes(kw) || tenderDescLower.includes(kw)));
+
+    if (isSectorMatched) {
+      score += 26;
+      reasons.push(`Sesuai Klasifikasi KBLI Sektor ${currentCompany.sector}`);
+    } else {
+      score += 12;
+      reasons.push("Sinergi Multidisiplin Lintas Sektor Industri");
+    }
+
+    if (currentCompany.isVerified) {
+      score += 8;
+      reasons.push("Legalitas NIB & Sertifikasi TKDN Terverifikasi BCI");
+    }
+
+    if (tender.value <= 10000000000) {
+      score += 5;
+      reasons.push("Pagu Anggaran Sesuai Kapasitas Licensi Vendor");
+    }
+
+    score = Math.min(99, Math.max(55, score));
+
+    return {
+      tenderId: tender.id,
+      matchPercentage: score,
+      fitLevel: score >= 90 ? 'Sangat Tinggi' : score >= 75 ? 'Tinggi' : 'Cukup',
+      reasons,
+      aiSummary: `Proyek "${tender.title}" memiliki tingkat kompatibilitas ${score}%. Profil PT ${currentCompany.name} (${currentCompany.sector}) memenuhi kualifikasi utama.`
+    };
+  }).sort((a, b) => b.matchPercentage - a.matchPercentage);
+
+  return { matches, aiGrounded: false, message: "Menggunakan BCI Local Tender Engine." };
+}
+
+function getAssistantFallback(type: string, companyName: string, sector: string) {
+  const dateStr = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
+  let docContent = "";
+
+  if (type === "SWOT") {
+    docContent = `# ANALISIS SWOT EKSEKUTIF: ${companyName.toUpperCase()}
+*Disiapkan secara otomatis oleh BCI Local Business Intelligence Engine*
+*Tanggal: ${dateStr}*
+
+### 1. STRENGTHS (Kekuatan Internal)
+*   **Keunggulan Operasional Lokal**: Pemahaman mendalam tentang pasar industri ${sector || "Indonesia"}.
+*   **Kepatuhan Hukum & TKDN**: Integritas legalitas lengkap dan kepatuhan NIB aktif yang diakui platform nasional.
+*   **Agilitas Layanan**: Kemampuan kustomisasi produk/layanan B2B secara responsif dibandingkan kompetitor impor.
+
+### 2. WEAKNESSES (Kelemahan Internal)
+*   **Keterbatasan Penetrasi Digital**: Memerlukan akselerasi adopsi otomatisasi ERP/SaaS untuk efisiensi rantai suplai.
+*   **Keterbatasan Skala Modal**: Kapasitas ekspansi masih sangat bergantung pada modal ventura atau sindikasi investor premium.
+
+### 3. OPPORTUNITIES (Peluang Eksternal)
+*   **Sinergi Tender BUMN & IKN**: Kebijakan pemerintah yang mewajibkan TKDN tinggi membuka gerbang kolaborasi proyek berskala nasional.
+*   **Pasar Ekspor Regional**: Sektor ${sector || "industri terkait"} Indonesia memiliki keunggulan kompetitif di kawasan ASEAN.
+
+### 4. THREATS (Ancaman Eksternal)
+*   **Fluktuasi Suku Bunga & Inflasi**: Mengancam stabilitas cashflow belanja modal alat berat dan material.
+*   **Persaingan Tarif Agresif**: Masuknya penyedia jasa global dengan modal skala raksasa.
+
+---
+*Catatan: Menggunakan BCI Local Engine. Hubungkan GEMINI_API_KEY untuk analisis kognitif berbasis real-time market data.*`;
+  } else if (type === "NDA" || type === "Kontrak") {
+    docContent = `# SURAT PERJANJIAN KERAHASIAAN (NON-DISCLOSURE AGREEMENT)
+**Nomor: NDA/${companyName.substring(0,4).toUpperCase()}/${new Date().getFullYear()}/089**
+
+Perjanjian Kerahasiaan ini ("Perjanjian") dibuat pada hari ini, tanggal ${dateStr}, oleh dan antara:
+1.  **${companyName}**, sebuah entitas bisnis yang bergerak di bidang ${sector || "Umum"}, berkedudukan hukum di Indonesia (selanjutnya disebut sebagai **"Pihak Pengungkap"**).
+2.  **Mitra Kolaborasi Strategis Business Connect Indonesia** (selanjutnya disebut sebagai **"Pihak Penerima"**).
+
+### PASAL 1: DEFINISI INFORMASI RAHASIA
+"Informasi Rahasia" mencakup semua data bisnis, rahasia dagang, rencana pemasaran, algoritma software, spesifikasi teknis mesin, daftar pelanggan, informasi keuangan, dan data tender yang diungkapkan baik secara tertulis maupun lisan selama masa kolaborasi.
+
+### PASAL 2: KEWAJIBAN NON-DISKLOSUR
+Pihak Penerima setuju untuk menjaga kerahasiaan penuh atas Informasi Rahasia dan tidak akan membocorkannya kepada pihak ketiga mana pun tanpa persetujuan tertulis sebelumnya dari Pihak Pengungkap.
+
+### PASAL 3: SANKSI DAN GANTI RUGI
+Pelanggaran terhadap Perjanjian ini akan dikenakan sanksi ganti rugi material sesuai dengan ketentuan hukum perdata Republik Indonesia yang berlaku, serta pemutusan keanggotaan BCI Enterprise secara sepihak.
+
+---
+**Pihak Pengungkap**                      **Pihak Penerima**
+*(Tandatangan Digital)*                  *(Tandatangan Digital)*`;
+  } else {
+    docContent = `# DRAF DOKUMEN BISNIS PREMIUM: ${type.toUpperCase()}
+*Entitas: ${companyName} (${sector || "Umum"})*
+*Dibuat pada: ${dateStr}*
+
+### RINGKASAN EKSEKUTIF
+Dokumen ini disusun untuk menindaklanjuti kebutuhan kolaborasi strategis dalam platform Business Connect Indonesia. Kami berkomitmen untuk menghadirkan keunggulan kompetitif, kualitas operasional tinggi, serta kepatuhan penuh terhadap standar industri nasional.
+
+### BUTIR PENAWARAN & TUJUAN
+*   **Kualitas & Kepatuhan**: Mengedepankan integrasi sistematis untuk efisiensi waktu hingga 30%.
+*   **Estimasi Anggaran**: Penawaran harga bersifat fleksibel dengan syarat pembayaran yang disesuaikan (termin/L/C).
+*   **Dukungan Penuh**: Garansi instalasi, pelatihan SDM, dan pemeliharaan rutin.
+
+---
+*Draf ini adalah draf dasar instan BCI. Hubungkan GEMINI_API_KEY untuk kecerdasan sintesis draf penuh.*`;
+  }
+
+  return {
+    document: docContent,
+    aiGrounded: false,
+    message: "Menggunakan template dokumen terstruktur BCI."
+  };
+}
+
+
 // ==========================================
 // 16. BUSINESS MATCHING AI (Gemini Grounded)
 // ==========================================
 app.post("/api/ai/matching", async (req, res) => {
-  const { companyId, targetSector, targetRegion } = req.body;
-  const db = readDB();
-  const currentCompany = db.companies.find(c => c.id === companyId);
-
-  if (!currentCompany) {
-    return res.status(404).json({ error: "Company not found" });
-  }
-
-  const otherCompanies = db.companies.filter(c => c.id !== companyId);
-  const ai = getAI();
-
-  if (!ai) {
-    // High-quality deterministic local engine fallback if Gemini is not configured yet
-    const matchingResults = otherCompanies.map(comp => {
-      let score = 50; // base score
-
-      // Matching sectors
-      if (comp.sector.toLowerCase().includes(currentCompany.sector.toLowerCase()) ||
-          currentCompany.sector.toLowerCase().includes(comp.sector.toLowerCase())) {
-        score += 25;
-      }
-
-      // Location match
-      if (comp.address.province === currentCompany.address.province) {
-        score += 15;
-      }
-      if (comp.address.city === currentCompany.address.city) {
-        score += 5;
-      }
-
-      // Legality weight
-      if (comp.isVerified) {
-        score += 5;
-      }
-
-      // Portfolio experience weight
-      score += Math.min(10, comp.portfolio.length * 4);
-
-      // Clamp score
-      score = Math.min(98, Math.max(45, score));
-
-      // Build specific Indonesian reasoning
-      let matchingReason = `Sektor ${comp.sector} sangat mendukung rantai suplai Anda. `;
-      if (comp.isVerified) {
-        matchingReason += `Legalitas NIB (${comp.legality.nib}) tervalidasi lengkap oleh Administrator BCI. `;
-      }
-      if (comp.address.province === currentCompany.address.province) {
-        matchingReason += `Berlokasi dekat di ${comp.address.city}, ${comp.address.province}, menghemat biaya logistik pengiriman.`;
-      } else {
-        matchingReason += `Meskipun berlokasi di ${comp.address.city}, mereka memiliki portofolio proyek nasional yang kuat.`;
-      }
-
-      return {
-        company: comp,
-        matchPercentage: score,
-        reason: matchingReason
-      };
-    });
-
-    return res.json({
-      matches: matchingResults.sort((a, b) => b.matchPercentage - a.matchPercentage),
-      aiGrounded: false,
-      message: "Menggunakan BCI Local Rule Engine. Konfigurasikan GEMINI_API_KEY di Secrets untuk pencocokan AI Kognitif penuh."
-    });
-  }
-
-  // Real Gemini Matching
   try {
-    const prompt = `Anda adalah sistem Business Matching AI cerdas untuk platform Business Connect Indonesia (BCI).
+    const { companyId } = req.body;
+    const db = readDB();
+    const currentCompany = db.companies.find(c => c.id === companyId);
+
+    if (!currentCompany) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    const otherCompanies = db.companies.filter(c => c.id !== companyId);
+    const ai = getAI();
+
+    if (!ai) {
+      return res.json(getMatchingFallback(currentCompany, otherCompanies));
+    }
+
+    try {
+      const prompt = `Anda adalah sistem Business Matching AI cerdas untuk platform Business Connect Indonesia (BCI).
 Tugas Anda adalah menilai persentase kecocokan kemitraan (skor 40-100) dan memberikan analisis bahasa Indonesia yang padat (maksimal 2 kalimat) antara Perusahaan Utama dengan daftar perusahaan lain.
 
 PERUSAHAAN UTAMA:
@@ -1632,7 +1749,7 @@ Lokasi: ${currentCompany.address.city}, ${currentCompany.address.province}
 Legalitas: Verified=${currentCompany.isVerified}
 
 DAFTAR PERUSAHAAN MITRA POTENSIAL:
-${otherCompanies.map((c, i) => `[ID: ${c.id}]
+${otherCompanies.map((c) => `[ID: ${c.id}]
 Nama: ${c.name}
 Sektor: ${c.sector}
 Deskripsi: ${c.description}
@@ -1649,33 +1766,36 @@ Berikan keluaran dalam format JSON array yang persis seperti berikut:
   }
 ]`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json"
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+
+      const parsed = cleanAndParseJSON(response.text, []);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const matches = otherCompanies.map(comp => {
+          const aiMatch = parsed.find((m: any) => m.companyId === comp.id);
+          return {
+            company: comp,
+            matchPercentage: aiMatch ? aiMatch.matchPercentage : 65,
+            reason: aiMatch ? aiMatch.reason : `Sinergi bisnis potensial di bidang ${comp.sector}.`
+          };
+        }).sort((a, b) => b.matchPercentage - a.matchPercentage);
+
+        return res.json({ matches, aiGrounded: true });
+      } else {
+        return res.json(getMatchingFallback(currentCompany, otherCompanies));
       }
-    });
-
-    const textOutput = response.text || "[]";
-    const parsed = JSON.parse(textOutput);
-
-    const matches = otherCompanies.map(comp => {
-      const aiMatch = parsed.find((m: any) => m.companyId === comp.id);
-      return {
-        company: comp,
-        matchPercentage: aiMatch ? aiMatch.matchPercentage : 65,
-        reason: aiMatch ? aiMatch.reason : `Sinergi bisnis potensial di bidang ${comp.sector}.`
-      };
-    }).sort((a, b) => b.matchPercentage - a.matchPercentage);
-
-    res.json({
-      matches,
-      aiGrounded: true
-    });
+    } catch (geminiErr) {
+      console.error("Gemini Matching AI Error (using local engine fallback):", geminiErr);
+      return res.json(getMatchingFallback(currentCompany, otherCompanies));
+    }
   } catch (err: any) {
-    console.error("Gemini Matching AI Error:", err);
-    res.status(500).json({ error: "Sistem AI sibuk, silakan coba beberapa saat lagi." });
+    console.error("General error in /api/ai/matching:", err);
+    return res.status(500).json({ error: "Gagal memproses Business Matching." });
   }
 });
 
@@ -1684,60 +1804,19 @@ Berikan keluaran dalam format JSON array yang persis seperti berikut:
 // 16.1 SMART TENDER MATCHING AI
 // ==========================================
 app.post("/api/ai/smart-tender-match", async (req, res) => {
-  const { companyId } = req.body;
-  const db = readDB();
-  const currentCompany = db.companies.find(c => c.id === companyId) || db.companies[0];
-
-  const tenders = db.tenders;
-  const ai = getAI();
-
-  if (!ai) {
-    // High-quality local matching engine fallback
-    const matches = tenders.map(tender => {
-      let score = 60; // base score
-      let reasons: string[] = [];
-
-      const companySectorLower = currentCompany.sector.toLowerCase();
-      const tenderTitleLower = tender.title.toLowerCase();
-      const tenderDescLower = tender.description.toLowerCase();
-
-      const sectorKeywords = companySectorLower.split(/[\s&/]+/);
-      const isSectorMatched = sectorKeywords.some(kw => kw.length > 3 && (tenderTitleLower.includes(kw) || tenderDescLower.includes(kw)));
-
-      if (isSectorMatched) {
-        score += 26;
-        reasons.push(`Sesuai Klasifikasi KBLI Sektor ${currentCompany.sector}`);
-      } else {
-        score += 12;
-        reasons.push("Sinergi Multidisiplin Lintas Sektor Industri");
-      }
-
-      if (currentCompany.isVerified) {
-        score += 8;
-        reasons.push("Legalitas NIB & Sertifikasi TKDN Terverifikasi BCI");
-      }
-
-      if (tender.value <= 10000000000) {
-        score += 5;
-        reasons.push("Pagu Anggaran Sesuai Kapasitas Lisensi Vendor");
-      }
-
-      score = Math.min(99, Math.max(55, score));
-
-      return {
-        tenderId: tender.id,
-        matchPercentage: score,
-        fitLevel: score >= 90 ? 'Sangat Tinggi' : score >= 75 ? 'Tinggi' : 'Cukup',
-        reasons,
-        aiSummary: `Proyek "${tender.title}" memiliki tingkat kompatibilitas ${score}%. Profil PT ${currentCompany.name} (${currentCompany.sector}) memenuhi kualifikasi utama.`
-      };
-    }).sort((a, b) => b.matchPercentage - a.matchPercentage);
-
-    return res.json({ matches, aiGrounded: false });
-  }
-
   try {
-    const prompt = `Anda adalah sistem Smart Tender Matching AI BCI. Evaluasi tingkat kecocokan profil perusahaan vendor dengan daftar tender proyek berikut (skor 50-99).
+    const { companyId } = req.body;
+    const db = readDB();
+    const currentCompany = db.companies.find(c => c.id === companyId) || db.companies[0];
+    const tenders = db.tenders;
+    const ai = getAI();
+
+    if (!ai) {
+      return res.json(getTenderMatchingFallback(currentCompany, tenders));
+    }
+
+    try {
+      const prompt = `Anda adalah sistem Smart Tender Matching AI BCI. Evaluasi tingkat kecocokan profil perusahaan vendor dengan daftar tender proyek berikut (skor 50-99).
 
 PERUSAHAAN VENDOR:
 Nama: ${currentCompany.name}
@@ -1764,17 +1843,25 @@ Berikan keluaran JSON array persis seperti format berikut:
   }
 ]`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: { responseMimeType: "application/json" }
-    });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: { responseMimeType: "application/json" }
+      });
 
-    const parsed = JSON.parse(response.text || "[]");
-    res.json({ matches: parsed, aiGrounded: true });
+      const parsed = cleanAndParseJSON(response.text, []);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return res.json({ matches: parsed, aiGrounded: true });
+      } else {
+        return res.json(getTenderMatchingFallback(currentCompany, tenders));
+      }
+    } catch (geminiErr) {
+      console.error("Smart Tender Match Gemini Error (using local engine fallback):", geminiErr);
+      return res.json(getTenderMatchingFallback(currentCompany, tenders));
+    }
   } catch (err: any) {
-    console.error("Smart Tender Match Error:", err);
-    res.status(500).json({ error: "Gagal analisis Smart Tender Matching" });
+    console.error("General error in /api/ai/smart-tender-match:", err);
+    return res.status(500).json({ error: "Gagal memproses Smart Tender Match." });
   }
 });
 
@@ -1783,13 +1870,19 @@ Berikan keluaran JSON array persis seperti format berikut:
 // 17. AI ASSISTANT (Proposal, SWOT, Kontrak, etc.)
 // ==========================================
 app.post("/api/ai/assistant", async (req, res) => {
-  const { type, companyName, sector, promptDetail, additionalNotes } = req.body;
-  if (!type || !companyName) {
-    return res.status(400).json({ error: "Missing required parameters" });
-  }
+  try {
+    const { type, companyName, sector, promptDetail, additionalNotes } = req.body;
+    if (!type || !companyName) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
 
-  const ai = getAI();
-  const requestPrompt = `Anda adalah AI Assistant Bisnis Profesional untuk platform Business Connect Indonesia (BCI).
+    const ai = getAI();
+    if (!ai) {
+      return res.json(getAssistantFallback(type, companyName, sector));
+    }
+
+    try {
+      const requestPrompt = `Anda adalah AI Assistant Bisnis Profesional untuk platform Business Connect Indonesia (BCI).
 Tugas Anda adalah memformulasikan dokumen bisnis korporat premium berkualitas tinggi dalam Bahasa Indonesia formal terstruktur dengan visual Markdown yang sangat rapi (menggunakan header, tebal, list, tabel jika diperlukan).
 
 Jenis Dokumen yang Diminta: ${type}
@@ -1800,93 +1893,23 @@ Catatan Sampingan: ${additionalNotes || "-"}
 
 Harap hasilkan dokumen lengkap yang siap pakai, meliputi pembuka formal, bagian utama yang terperinci (pasal demi pasal jika itu Kontrak/NDA, atau poin tindakan nyata jika SWOT/Business Plan), serta penutup. Jangan sertakan teks instruksi pembuka atau komentar tambahan selain isi dokumennya sendiri.`;
 
-  if (!ai) {
-    // Generate a beautiful Indonesian template on fallback
-    let docContent = "";
-    const dateStr = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: requestPrompt
+      });
 
-    if (type === "SWOT") {
-      docContent = `# ANALISIS SWOT EKSEKUTIF: ${companyName.toUpperCase()}
-*Disiapkan secara otomatis oleh BCI Local Business Intelligence Engine*
-*Tanggal: ${dateStr}*
-
-### 1. STRENGTHS (Kekuatan Internal)
-*   **Keunggulan Operasional Lokal**: Pemahaman mendalam tentang pasar industri ${sector || "Indonesia"}.
-*   **Kepatuhan Hukum & TKDN**: Integritas legalitas lengkap dan kepatuhan NIB aktif yang diakui platform nasional.
-*   **Agilitas Layanan**: Kemampuan kustomisasi produk/layanan B2B secara responsif dibandingkan kompetitor impor.
-
-### 2. WEAKNESSES (Kelemahan Internal)
-*   **Keterbatasan Penetrasi Digital**: Memerlukan akselerasi adopsi otomatisasi ERP/SaaS untuk efisiensi rantai suplai.
-*   **Keterbatasan Skala Modal**: Kapasitas ekspansi masih sangat bergantung pada modal ventura atau sindikasi investor premium.
-
-### 3. OPPORTUNITIES (Peluang Eksternal)
-*   **Sinergi Tender BUMN & IKN**: Kebijakan pemerintah yang mewajibkan TKDN tinggi membuka gerbang kolaborasi proyek berskala nasional.
-*   **Pasar Ekspor Regional**: Sektor ${sector || "industri terkait"} Indonesia memiliki keunggulan kompetitif di kawasan ASEAN.
-
-### 4. THREATS (Ancaman Eksternal)
-*   **Fluktuasi Suku Bunga & Inflasi**: Mengancam stabilitas cashflow belanja modal alat berat dan material.
-*   **Persaingan Tarif Agresif**: Masuknya penyedia jasa global dengan modal skala raksasa.
-
----
-*Catatan: Konfigurasikan GEMINI_API_KEY di panel Secrets BCI untuk menghasilkan analisis prediktif berbasis real-time market data.*`;
-    } else if (type === "NDA" || type === "Kontrak") {
-      docContent = `# SURAT PERJANJIAN KERAHASIAAN (NON-DISCLOSURE AGREEMENT)
-**Nomor: NDA/${companyName.substring(0,4).toUpperCase()}/${new Date().getFullYear()}/089**
-
-Perjanjian Kerahasiaan ini ("Perjanjian") dibuat pada hari ini, tanggal ${dateStr}, oleh dan antara:
-1.  **${companyName}**, sebuah entitas bisnis yang bergerak di bidang ${sector || "Umum"}, berkedudukan hukum di Indonesia (selanjutnya disebut sebagai **"Pihak Pengungkap"**).
-2.  **Mitra Kolaborasi Strategis Business Connect Indonesia** (selanjutnya disebut sebagai **"Pihak Penerima"**).
-
-### PASAL 1: DEFINISI INFORMASI RAHASIA
-"Informasi Rahasia" mencakup semua data bisnis, rahasia dagang, rencana pemasaran, algoritma software, spesifikasi teknis mesin, daftar pelanggan, informasi keuangan, dan data tender yang diungkapkan baik secara tertulis maupun lisan selama masa kolaborasi.
-
-### PASAL 2: KEWAJIBAN NON-DISKLOSUR
-Pihak Penerima setuju untuk menjaga kerahasiaan penuh atas Informasi Rahasia dan tidak akan membocorkannya kepada pihak ketiga mana pun tanpa persetujuan tertulis sebelumnya dari Pihak Pengungkap.
-
-### PASAL 3: SANKSI DAN GANTI RUGI
-Pelanggaran terhadap Perjanjian ini akan dikenakan sanksi ganti rugi material sesuai dengan ketentuan hukum perdata Republik Indonesia yang berlaku, serta pemutusan keanggotaan BCI Enterprise secara sepihak.
-
----
-**Pihak Pengungkap**                      **Pihak Penerima**
-*(Tandatangan Digital)*                  *(Tandatangan Digital)*`;
-    } else {
-      docContent = `# DRAF DOKUMEN BISNIS PREMIUM: ${type.toUpperCase()}
-*Entitas: ${companyName} (${sector || "Umum"})*
-*Dibuat pada: ${dateStr}*
-
-### RINGKASAN EKSEKUTIF
-Dokumen ini disusun untuk menindaklanjuti kebutuhan kolaborasi strategis dalam platform Business Connect Indonesia. Kami berkomitmen untuk menghadirkan keunggulan kompetitif, kualitas operasional tinggi, serta kepatuhan penuh terhadap standar industri nasional.
-
-### BUTIR PENAWARAN & TUJUAN
-*   **Kualitas & Kepatuhan**: Mengedepankan integrasi sistematis untuk efisiensi waktu hingga 30%.
-*   **Estimasi Anggaran**: Penawaran harga bersifat fleksibel dengan syarat pembayaran yang disesuaikan (termin/L/C).
-*   **Dukungan Penuh**: Garansi instalasi, pelatihan SDM, dan pemeliharaan rutin.
-
----
-*Draf ini adalah draf dasar instan. Aktifkan koneksi AI Gemini Anda di Secrets untuk menulis proposal yang dipersonalisasi secara kognitif mendalam.*`;
+      if (response.text) {
+        return res.json({ document: response.text, aiGrounded: true });
+      } else {
+        return res.json(getAssistantFallback(type, companyName, sector));
+      }
+    } catch (geminiErr) {
+      console.error("Gemini AI Assistant Error (using local template engine fallback):", geminiErr);
+      return res.json(getAssistantFallback(type, companyName, sector));
     }
-
-    return res.json({
-      document: docContent,
-      aiGrounded: false,
-      message: "Menggunakan template dokumen terstruktur BCI. Hubungkan GEMINI_API_KEY untuk kecerdasan sintesis draf penuh."
-    });
-  }
-
-  // Real Gemini Generator
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: requestPrompt
-    });
-
-    res.json({
-      document: response.text || "Gagal membuat dokumen.",
-      aiGrounded: true
-    });
   } catch (err: any) {
-    console.error("Gemini AI Assistant Error:", err);
-    res.status(500).json({ error: "Gagal menghubungkan ke Gemini AI: " + err.message });
+    console.error("General error in /api/ai/assistant:", err);
+    return res.status(500).json({ error: "Gagal membuat dokumen AI." });
   }
 });
 
