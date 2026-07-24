@@ -59,28 +59,32 @@ export default function App() {
       const res = await fetch('/api/db');
       if (res.ok) {
         const data: AppDatabase = await res.json();
-        setDb(data);
+        if (data && typeof data === 'object') {
+          setDb(data);
 
-        // Restore active user from localStorage if exists
-        const storedUserId = localStorage.getItem('bci_user_id');
-        if (storedUserId) {
-          const foundUser = data.users.find(u => u.id === storedUserId);
-          if (foundUser) {
-            setCurrentUser(foundUser);
-          } else {
-            localStorage.removeItem('bci_user_id');
-            setCurrentUser(null);
-          }
-        } else if (currentUser) {
-          // Sync with any database updates for current user
-          const updatedUser = data.users.find(u => u.id === currentUser.id);
-          if (updatedUser) {
-            setCurrentUser(updatedUser);
+          // Restore active user from localStorage if exists
+          const storedUserId = localStorage.getItem('bci_user_id');
+          if (storedUserId && data.users) {
+            const foundUser = data.users.find(u => u.id === storedUserId);
+            if (foundUser) {
+              setCurrentUser(foundUser);
+            } else {
+              localStorage.removeItem('bci_user_id');
+              setCurrentUser(null);
+            }
+          } else if (currentUser && data.users) {
+            // Sync with any database updates for current user
+            const updatedUser = data.users.find(u => u.id === currentUser.id);
+            if (updatedUser) {
+              setCurrentUser(updatedUser);
+            }
           }
         }
+      } else {
+        console.warn("Backend DB returned status", res.status, "- using local fallback state.");
       }
     } catch (err) {
-      console.error("Failed to load backend DB", err);
+      console.error("Failed to load backend DB:", err);
     }
   };
 

@@ -16,6 +16,7 @@ import {
   Maximize
 } from 'lucide-react';
 import { AppDatabase, Company, User } from '../types';
+import SupabaseHealthMonitor from './SupabaseHealthMonitor';
 
 interface AdminDashboardViewProps {
   db: AppDatabase;
@@ -129,6 +130,9 @@ export default function AdminDashboardView({
         </div>
 
       </div>
+
+      {/* Supabase & Server Health Monitor */}
+      <SupabaseHealthMonitor />
 
       {/* Navigation Inside Admin Dashboard */}
       <div className="flex border-b border-slate-100 text-xs font-black gap-4 pt-2">

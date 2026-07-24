@@ -44,6 +44,7 @@ import {
 } from 'recharts';
 import { AppDatabase, User } from '../types';
 import { exportToPDF } from '../utils/pdfExport';
+import SupabaseHealthMonitor from './SupabaseHealthMonitor';
 
 interface DashboardViewProps {
   db: AppDatabase;
@@ -255,6 +256,9 @@ export default function DashboardView({ db, currentUser, onViewChange }: Dashboa
         </div>
 
       </div>
+
+      {/* Real-time Supabase & Server Health Monitor */}
+      <SupabaseHealthMonitor />
 
       {/* Widget: Rekomendasi Networking Harian AI */}
       <div className="glass-card rounded-3xl p-6 shadow-md border border-amber-300/60 bg-gradient-to-br from-amber-50/40 via-orange-50/20 to-white glossy-top-highlight space-y-4">
