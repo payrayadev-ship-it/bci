@@ -674,15 +674,6 @@ const initialDatabase: AppDatabase = {
   }
 };
 
-// Initialize DB file if not exists
-if (!fs.existsSync(DB_DIR)) {
-  fs.mkdirSync(DB_DIR);
-}
-if (!fs.existsSync(DB_FILE)) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(initialDatabase, null, 2));
-  console.log("Database file seeded.");
-}
-
 // Read database helper
 function readDB(): AppDatabase {
   if (memoryDb) return memoryDb;
@@ -690,16 +681,21 @@ function readDB(): AppDatabase {
     if (!fs.existsSync(DB_DIR)) {
       fs.mkdirSync(DB_DIR, { recursive: true });
     }
-    if (!fs.existsSync(DB_FILE)) {
-      fs.writeFileSync(DB_FILE, JSON.stringify(initialDatabase, null, 2));
+    if (fs.existsSync(DB_FILE)) {
+      const data = fs.readFileSync(DB_FILE, "utf-8");
+      memoryDb = JSON.parse(data) as AppDatabase;
+      return memoryDb;
+    } else {
+      try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(initialDatabase, null, 2));
+      } catch (wErr) {
+        console.warn("Could not write db.json to disk, falling back to memory:", wErr);
+      }
       memoryDb = initialDatabase;
-      return initialDatabase;
+      return memoryDb;
     }
-    const data = fs.readFileSync(DB_FILE, "utf-8");
-    memoryDb = JSON.parse(data) as AppDatabase;
-    return memoryDb;
   } catch (e) {
-    console.error("Failed to read database, resetting to seed...", e);
+    console.warn("Failed to read database from disk, using in-memory fallback:", e);
     memoryDb = memoryDb || initialDatabase;
     return memoryDb;
   }
@@ -714,7 +710,7 @@ function writeDB(data: AppDatabase) {
     }
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
   } catch (e) {
-    console.error("Failed to write to database", e);
+    console.warn("Failed to write to database on disk (operating in-memory):", e);
   }
 }
 
@@ -843,8 +839,13 @@ app.post("/api/auth/register", (req, res) => {
 
 // 1. Get entire DB state (sync)
 app.get("/api/db", (req, res) => {
-  const db = readDB();
-  res.json(db);
+  try {
+    const db = readDB();
+    res.json(db);
+  } catch (err: any) {
+    console.error("Error in GET /api/db:", err);
+    res.status(200).json(memoryDb || initialDatabase);
+  }
 });
 
 // Update user settings route
